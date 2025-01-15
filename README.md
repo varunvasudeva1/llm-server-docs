@@ -1,10 +1,10 @@
 # Local LLaMA Server Setup Documentation
 
-_TL;DR_: A comprehensive guide to setting up a fully local and private language model server equipped with:
-- an LLM inference engine  [[Ollama](https://github.com/ollama/ollama) or [vLLM](https://github.com/vllm-project/vllm)]
-- web platform for chats, RAG, and web search [[Open WebUI](https://github.com/open-webui/open-webui)]
-- text-to-speech server [[OpenedAI Speech](https://github.com/matatonic/openedai-speech)]
-- image generation platform [[ComfyUI](https://github.com/comfyanonymous/ComfyUI)]
+_TL;DR_: A comprehensive guide to setting up a fully local and private language model server equipped with the following:
+- Inference Engine ([Ollama](https://github.com/ollama/ollama), [vLLM](https://github.com/vllm-project/vllm))
+- Chat Platform ([Open WebUI](https://github.com/open-webui/open-webui))
+- Text-to-Speech Server ([OpenedAI Speech](https://github.com/matatonic/openedai-speech), [Kokoro FastAPI](https://github.com/remsky/Kokoro-FastAPI))
+- Text-to-Image Server ([ComfyUI](https://github.com/comfyanonymous/ComfyUI))
 
 ## Table of Contents
 
@@ -18,31 +18,37 @@ _TL;DR_: A comprehensive guide to setting up a fully local and private language 
     - [HuggingFace CLI](#huggingface-cli)
   - [General](#general)
   - [Drivers](#drivers)
+  - [Startup Script](#startup-script)
+    - [Scheduling Startup Script](#scheduling-startup-script)
+    - [Configuring Script Permissions](#configuring-script-permissions)
+  - [Auto-Login](#auto-login)
   - [Inference Engine](#inference-engine)
-    - [Comparing Ollama and vLLM](#comparing-ollama-and-vllm)
     - [Ollama](#ollama)
     - [vLLM](#vllm)
       - [Serving a Different Model](#serving-a-different-model)
       - [Managing Models](#managing-models)
       - [Open WebUI Integration](#open-webui-integration)
-  - [Startup Script](#startup-script)
-  - [Scheduling Startup Script](#scheduling-startup-script)
-  - [Configuring Script Permissions](#configuring-script-permissions)
-  - [Configuring Auto-Login](#configuring-auto-login)
-  - [Additional Setup](#additional-setup)
-    - [SSH](#ssh)
-    - [Firewall](#firewall)
+    - [Comparison](#comparison)
+  - [Chat Platform](#chat-platform)
     - [Open WebUI](#open-webui)
+  - [Text-to-Speech Server](#text-to-speech-server)
     - [OpenedAI Speech](#openedai-speech)
       - [Downloading Voices](#downloading-voices)
       - [Open WebUI Integration](#open-webui-integration-1)
-    - [ComfyUI](#comfyui)
+    - [Kokoro FastAPI](#kokoro-fastapi)
       - [Open WebUI Integration](#open-webui-integration-2)
+    - [Comparison](#comparison-1)
+  - [Text-to-Image Server](#text-to-image-server)
+    - [ComfyUI](#comfyui)
+      - [Open WebUI Integration](#open-webui-integration-3)
+  - [SSH](#ssh)
+  - [Firewall](#firewall)
   - [Verifying](#verifying)
     - [Ollama](#ollama-1)
     - [vLLM](#vllm-1)
     - [Open WebUI](#open-webui-1)
     - [OpenedAI Speech](#openedai-speech-1)
+    - [Kokoro FastAPI](#kokoro-fastapi-1)
     - [ComfyUI](#comfyui-1)
   - [Updating](#updating)
     - [General](#general-1)
@@ -51,6 +57,7 @@ _TL;DR_: A comprehensive guide to setting up a fully local and private language 
     - [vLLM](#vllm-2)
     - [Open WebUI](#open-webui-2)
     - [OpenedAI Speech](#openedai-speech-2)
+    - [Kokoro FastAPI](#kokoro-fastapi-2)
     - [ComfyUI](#comfyui-2)
   - [Troubleshooting](#troubleshooting)
     - [`ssh`](#ssh-1)
@@ -202,29 +209,97 @@ Now, we'll install the required GPU drivers that allow programs to utilize their
     ```
 - Reboot the server.
 
+## Startup Script
+
+In this step, we'll create a script called `init.bash`. This script will be run at boot to set the GPU power limit and start the server using Ollama. We set the GPU power limit lower because it has been seen in testing and inference that there is only a 5-15% performance decrease for a 30% reduction in power consumption. This is especially important for servers that are running 24/7.
+
+- Run the following commands:
+    ```
+    touch init.bash
+    nano init.bash
+    ```
+- Add the following lines to the script:
+    ```
+    #!/bin/bash
+    sudo nvidia-smi -pm 1
+    sudo nvidia-smi -pl <power_limit>
+    ```
+    > Replace `<power_limit>` with the desired power limit in watts. For example, `sudo nvidia-smi -pl 250`.
+
+    For multiple GPUs, modify the script to set the power limit for each GPU:
+    ```
+    sudo nvidia-smi -i 0 -pl <power_limit>
+    sudo nvidia-smi -i 1 -pl <power_limit>
+    ```
+- Save and exit the script.
+- Make the script executable:
+    ```
+    chmod +x init.bash
+    ```
+
+### Scheduling Startup Script
+
+Adding the `init.bash` script to the crontab will schedule it to run at boot.
+
+- Run the following command:
+    ```
+    crontab -e
+    ```
+- Add the following line to the file:
+    ```
+    @reboot /path/to/init.bash
+    ```
+    > Replace `/path/to/init.bash` with the path to the `init.bash` script.
+
+- (Optional) Add the following line to shutdown the server at 12am:
+    ```
+    0 0 * * * /sbin/shutdown -h now
+    ```
+- Save and exit the file.
+
+### Configuring Script Permissions
+
+We want `init.bash` to run the `nvidia-smi` commands without having to enter a password. This is done by giving `nvidia-persistenced` and `nvidia-smi` passwordless `sudo` permissions, and can be achieved by editing the `sudoers` file.
+
+AMD users can skip this step as power limiting is not supported on AMD GPUs.
+
+- Run the following command:
+    ```
+    sudo visudo
+    ```
+- Add the following lines to the file:
+    ```
+    <username> ALL=(ALL) NOPASSWD: /usr/bin/nvidia-persistenced
+    <username> ALL=(ALL) NOPASSWD: /usr/bin/nvidia-smi
+    ```
+    > Replace `<username>` with your username.
+- Save and exit the file.
+
+> [!IMPORTANT]
+> Ensure that you add these lines AFTER `%sudo ALL=(ALL:ALL) ALL`. The order of the lines in the file matters - the last matching line will be used so if you add these lines before `%sudo ALL=(ALL:ALL) ALL`, they will be ignored.
+
+## Auto-Login
+
+When the server boots up, we want it to automatically log in to a user account and run the `init.bash` script. This is done by configuring the `lightdm` display manager.
+
+- Run the following command:
+    ```
+    sudo nano /etc/lightdm/lightdm.conf
+    ```
+- Find the following commented line. It should be in the `[Seat:*]` section.
+    ```
+    # autologin-user=
+    ```
+- Uncomment the line and add your username:
+    ```
+    autologin-user=<username>
+    ```
+    > Replace `<username>` with your username.
+- Save and exit the file.
+
 ## Inference Engine
 
 The inference engine is one of the primary components of this setup. It is code that takes model files containing weights and makes it possible to get useful outputs from them. This guide allows a choice between Ollama and vLLM - both are mature, production-grade inference engines with different priorities and stengths.
-
-### Comparing Ollama and vLLM
-
-Why you may pick Ollama over vLLM:
-- **Simplicity**: Ollama's one-click install process and CLI to manage models is easier to use.
-- **Open WebUI first-class citizen**: The UI supports Ollama actions like pulling and removing models natively.
-- **Efficient GPU-CPU splitting**: Running models that don't fit entirely within the GPU is trivial.
-- **Best GGUF implementation**: Runs GGUF better than any other inference engine, thanks to `llama.cpp`.
-
-Why you may pick vLLM over Ollama:
-- **Supports vision models**: vLLM already supports vision LMs like Qwen 2.5 VL and LLaMA 3.2. This feature is not supported by `llama.cpp`, but Ollama is separately implementing support.
-- **Faster GPU inference**: Using GGUFs vs. native safetensors leaves performance on the table. vLLM is also better for distributed inference across multiple GPUs.
-- **Broader compatibility**: vLLM can run model quantization types (AWQ, GPTQ, BnB, etc.) aside from just GGUF.
-
-You can always keep both and decide to spin them up at your discretion. Using Ollama as a service offers no degradation in experience because unused models are offloaded from VRAM after some time. Using vLLM as a service keeps a model in memory, so I wouldn't use this alongside Ollama in an automated, always-on fashion unless it was your primary inference engine. Essentially,
-
-| Primary Engine | Secondary Engine | Run SE as service? |
-| -------------- | ---------------- | ------------------ |
-| Ollama         | vLLM             | No                 |
-| vLLM           | Ollama           | Yes                |
 
 ### Ollama
 
@@ -360,154 +435,27 @@ Navigate to `Admin Panel > Settings > Connections` and set the following values:
 - API Base URL: `http://host.docker.internal:8556/v1`
 - API Key: `anything-you-like`
 
-## Startup Script
+### Comparison
 
-In this step, we'll create a script called `init.bash`. This script will be run at boot to set the GPU power limit and start the server using Ollama. We set the GPU power limit lower because it has been seen in testing and inference that there is only a 5-15% performance decrease for a 30% reduction in power consumption. This is especially important for servers that are running 24/7.
+Why you may pick Ollama over vLLM:
+- **Simplicity**: Ollama's one-click install process and CLI to manage models is easier to use.
+- **Open WebUI first-class citizen**: The UI supports Ollama actions like pulling and removing models natively.
+- **Efficient GPU-CPU splitting**: Running models that don't fit entirely within the GPU is trivial.
+- **Best GGUF implementation**: Runs GGUF better than any other inference engine, thanks to `llama.cpp`.
 
-- Run the following commands:
-    ```
-    touch init.bash
-    nano init.bash
-    ```
-- Add the following lines to the script:
-    ```
-    #!/bin/bash
-    sudo nvidia-smi -pm 1
-    sudo nvidia-smi -pl <power_limit>
-    ```
-    > Replace `<power_limit>` with the desired power limit in watts. For example, `sudo nvidia-smi -pl 250`.
+Why you may pick vLLM over Ollama:
+- **Supports vision models**: vLLM already supports vision LMs like Qwen 2.5 VL and LLaMA 3.2. This feature is not supported by `llama.cpp`, but Ollama has separately implemented support (only for `llama3.2-vision` as of Jan 12, 2025).
+- **Faster GPU inference**: Using GGUFs vs. native safetensors leaves performance on the table. vLLM is also better for distributed inference across multiple GPUs.
+- **Broader compatibility**: vLLM can run model quantization types (AWQ, GPTQ, BnB, etc.) aside from just GGUF.
 
-    For multiple GPUs, modify the script to set the power limit for each GPU:
-    ```
-    sudo nvidia-smi -i 0 -pl <power_limit>
-    sudo nvidia-smi -i 1 -pl <power_limit>
-    ```
-- Save and exit the script.
-- Make the script executable:
-    ```
-    chmod +x init.bash
-    ```
+You can always keep both and decide to spin them up at your discretion. Using Ollama as a service offers no degradation in experience because unused models are offloaded from VRAM after some time. Using vLLM as a service keeps a model in memory, so I wouldn't use this alongside Ollama in an automated, always-on fashion unless it was your primary inference engine. Essentially,
 
-## Scheduling Startup Script
+| Primary Engine | Secondary Engine | Run SE as service? |
+| -------------- | ---------------- | ------------------ |
+| Ollama         | vLLM             | No                 |
+| vLLM           | Ollama           | Yes                |
 
-Adding the `init.bash` script to the crontab will schedule it to run at boot.
-
-- Run the following command:
-    ```
-    crontab -e
-    ```
-- Add the following line to the file:
-    ```
-    @reboot /path/to/init.bash
-    ```
-    > Replace `/path/to/init.bash` with the path to the `init.bash` script.
-
-- (Optional) Add the following line to shutdown the server at 12am:
-    ```
-    0 0 * * * /sbin/shutdown -h now
-    ```
-- Save and exit the file.
-
-## Configuring Script Permissions
-
-We want `init.bash` to run the `nvidia-smi` commands without having to enter a password. This is done by giving `nvidia-persistenced` and `nvidia-smi` passwordless `sudo` permissions, and can be achieved by editing the `sudoers` file.
-
-AMD users can skip this step as power limiting is not supported on AMD GPUs.
-
-- Run the following command:
-    ```
-    sudo visudo
-    ```
-- Add the following lines to the file:
-    ```
-    <username> ALL=(ALL) NOPASSWD: /usr/bin/nvidia-persistenced
-    <username> ALL=(ALL) NOPASSWD: /usr/bin/nvidia-smi
-    ```
-    > Replace `<username>` with your username.
-- Save and exit the file.
-
-> [!IMPORTANT]
-> Ensure that you add these lines AFTER `%sudo ALL=(ALL:ALL) ALL`. The order of the lines in the file matters - the last matching line will be used so if you add these lines before `%sudo ALL=(ALL:ALL) ALL`, they will be ignored.
-
-## Configuring Auto-Login
-
-When the server boots up, we want it to automatically log in to a user account and run the `init.bash` script. This is done by configuring the `lightdm` display manager.
-
-- Run the following command:
-    ```
-    sudo nano /etc/lightdm/lightdm.conf
-    ```
-- Find the following commented line. It should be in the `[Seat:*]` section.
-    ```
-    # autologin-user=
-    ```
-- Uncomment the line and add your username:
-    ```
-    autologin-user=<username>
-    ```
-    > Replace `<username>` with your username.
-- Save and exit the file.
-
-## Additional Setup
-
-### SSH
-
-Enabling SSH allows you to connect to the server remotely. After configuring SSH, you can connect to the server from another device on the same network using an SSH client like PuTTY or the terminal. This lets you run your server headlessly without needing a monitor, keyboard, or mouse after the initial setup.
-
-On the server:
-- Run the following command:
-    ```
-    sudo apt install openssh-server
-    ```
-- Start the SSH service:
-    ```
-    sudo systemctl start ssh
-    ```
-- Enable the SSH service to start at boot:
-    ```
-    sudo systemctl enable ssh
-    ```
-- Find the server's IP address:
-    ```
-    ip a
-    ```
-
-On the client:
-- Connect to the server using SSH:
-    ```
-    ssh <username>@<ip_address>
-    ```
-    > Replace `<username>` with your username and `<ip_address>` with the server's IP address.
-
-> [!NOTE]
-> If you expect to tunnel into your server often, I highly recommend following [this guide](https://www.raspberrypi.com/documentation/computers/remote-access.html#configure-ssh-without-a-password) to enable passwordless SSH using `ssh-keygen` and `ssh-copy-id`. It worked perfectly on my Debian system despite having been written for Raspberry Pi OS.
-
-### Firewall
-
-Setting up a firewall is essential for securing your server. The Uncomplicated Firewall (UFW) is a simple and easy-to-use firewall for Linux. You can use UFW to allow or deny incoming and outgoing traffic to and from your server.
-
-- Install UFW:
-    ```
-    sudo apt install ufw
-    ```
-- Allow SSH, HTTPS, and any other ports you need:
-    ```
-    sudo ufw allow ssh https 3000 11434 8556 80 8000 8080 8188
-    ```
-    Here, we're allowing SSH (port 22), HTTPS (port 443), Open WebUI (port 3000), Ollama (port 11434), vLLM (port 8556), HTTP (port 80), OpenedAI Speech (8000), Docker (port 8080), and ComfyUI (port 8188). You can add or remove ports as needed.
-- Enable UFW:
-    ```
-    sudo ufw enable
-    ```
-- Check the status of UFW:
-    ```
-    sudo ufw status
-    ```
-
-> [!WARNING]
-> Enabling UFW without allowing access to port 22 will disrupt your existing SSH connections. If you run a headless setup, this means connecting a monitor to your server and then allowing SSH access through UFW. Be careful to ensure that this port is allowed when making changes to UFW's configuration.
-
-Refer to [this guide](https://www.digitalocean.com/community/tutorials/how-to-set-up-a-firewall-with-ufw-on-debian-10) for more information on setting up UFW.
+## Chat Platform
 
 ### Open WebUI
 
@@ -526,6 +474,14 @@ sudo docker run -d -p 3000:8080 --gpus all --add-host=host.docker.internal:host-
 You can access it by navigating to `http://localhost:3000` in your browser or `http://<server_IP>:3000` from another device on the same network. There's no need to add this to the `init.bash` script as Open WebUI will start automatically at boot via Docker Engine.
 
 Read more about Open WebUI [here](https://github.com/open-webui/open-webui).
+
+## Text-to-Speech Server
+
+> [!NOTE]
+> `host.docker.internal` is a magic hostname that resolves to the internal IP address assigned to the host by Docker. This allows containers to communicate with services running on the host, such as databases or web servers, without needing to know the host's IP address. It simplifies communication between containers and host-based services, making it easier to develop and deploy applications.
+
+> [!NOTE]
+> The TTS engine is set to `OpenAI` because OpenedAI Speech is OpenAI-compatible. There is no data transfer between OpenAI and OpenedAI Speech - the API is simply a wrapper around Piper and XTTS.
 
 ### OpenedAI Speech
 
@@ -608,11 +564,45 @@ Navigate to `Admin Panel > Settings > Audio` and set the following values:
 - API Key: `anything-you-like`
 - Set Model: `tts-1` (for Piper) or `tts-1-hd` (for XTTS)
 
-> [!NOTE]
-> `host.docker.internal` is a magic hostname that resolves to the internal IP address assigned to the host by Docker. This allows containers to communicate with services running on the host, such as databases or web servers, without needing to know the host's IP address. It simplifies communication between containers and host-based services, making it easier to develop and deploy applications.
+### Kokoro FastAPI
 
-> [!NOTE]
-> The TTS engine is set to `OpenAI` because OpenedAI Speech is OpenAI-compatible. There is no data transfer between OpenAI and OpenedAI Speech - the API is simply a wrapper around Piper and XTTS.
+Kokoro FastAPI is a text-to-speech server that wraps around and provides OpenAI-compatible API inference for [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M), a state-of-the-art TTS model. The documentation for this project is fantastic and covers most, if not all, of the use cases for the project itself.
+
+To install Kokoro-FastAPI, run
+```
+git clone https://github.com/remsky/Kokoro-FastAPI.git
+cd Kokoro-FastAPI
+sudo docker compose up --build
+```
+
+The server can be used in two ways: an API and a UI. By default, the API is served on port 8880 and the UI is served on port 7860.
+
+#### Open WebUI Integration
+
+Navigate to `Admin Panel > Settings > Audio` and set the following values:
+
+- Text-to-Speech Engine: `OpenAI`
+- API Base URL: `http://host.docker.internal:8880/v1`
+- API Key: `anything-you-like`
+- Set Model: `kokoro`
+- Response Splitting: None (this is crucial - Kokoro uses a novel audio splitting system)
+
+
+### Comparison
+
+You may choose OpenedAI Speech over Kokoro because:
+
+1) **Voice Cloning**: xTTS v2 offers extensive support for cloning voices with small samples of audio.
+2) **Choice of Voices**: Piper offers a very large variety of voices across multiple languages, dialects, and accents.
+
+You may choose Kokoro over OpenedAI Speech because:
+
+1) Natural Tone: Kokoro's voices are very natural sounding and offer a better experience than Piper. While Piper has high quality voices, the text can sound robotic when reading out complex words/sentences.
+2) Advanced Splitting: Kokoro splits responses up in a better format, making any pauses in speech feel more real. It also natively skips over Markdown formatting like lists and asterisks for bold/italics.
+
+Kokoro's performance makes it an ideal candidate for regular use as a voice assistant chained to a language model in Open WebUI.
+
+## Text-to-Image Server
 
 ### ComfyUI
 
@@ -675,6 +665,65 @@ Navigate to `Admin Panel > Settings > Images` and set the following values:
 > [!TIP]
 > You'll either need more than 24GB of VRAM or to use a small language model mostly on CPU to use Open WebUI with FLUX.1 [dev]. FLUX.1 [schnell] and a small language model, however, should fit cleanly in 24GB of VRAM, making for a faster experience if you intend to regularly use both text and image generation together.
 
+## SSH
+
+Enabling SSH allows you to connect to the server remotely. After configuring SSH, you can connect to the server from another device on the same network using an SSH client like PuTTY or the terminal. This lets you run your server headlessly without needing a monitor, keyboard, or mouse after the initial setup.
+
+On the server:
+- Run the following command:
+    ```
+    sudo apt install openssh-server
+    ```
+- Start the SSH service:
+    ```
+    sudo systemctl start ssh
+    ```
+- Enable the SSH service to start at boot:
+    ```
+    sudo systemctl enable ssh
+    ```
+- Find the server's IP address:
+    ```
+    ip a
+    ```
+
+On the client:
+- Connect to the server using SSH:
+    ```
+    ssh <username>@<ip_address>
+    ```
+    > Replace `<username>` with your username and `<ip_address>` with the server's IP address.
+
+> [!NOTE]
+> If you expect to tunnel into your server often, I highly recommend following [this guide](https://www.raspberrypi.com/documentation/computers/remote-access.html#configure-ssh-without-a-password) to enable passwordless SSH using `ssh-keygen` and `ssh-copy-id`. It worked perfectly on my Debian system despite having been written for Raspberry Pi OS.
+
+## Firewall
+
+Setting up a firewall is essential for securing your server. The Uncomplicated Firewall (UFW) is a simple and easy-to-use firewall for Linux. You can use UFW to allow or deny incoming and outgoing traffic to and from your server.
+
+- Install UFW:
+    ```
+    sudo apt install ufw
+    ```
+- Allow SSH, HTTPS, and any other ports you need:
+    ```
+    sudo ufw allow ssh https 3000 11434 8556 80 8000 8080 8188
+    ```
+    Here, we're allowing SSH (port 22), HTTPS (port 443), Open WebUI (port 3000), Ollama (port 11434), vLLM (port 8556), HTTP (port 80), OpenedAI Speech (8000), Docker (port 8080), and ComfyUI (port 8188). You can add or remove ports as needed.
+- Enable UFW:
+    ```
+    sudo ufw enable
+    ```
+- Check the status of UFW:
+    ```
+    sudo ufw status
+    ```
+
+> [!WARNING]
+> Enabling UFW without allowing access to port 22 will disrupt your existing SSH connections. If you run a headless setup, this means connecting a monitor to your server and then allowing SSH access through UFW. Be careful to ensure that this port is allowed when making changes to UFW's configuration.
+
+Refer to [this guide](https://www.digitalocean.com/community/tutorials/how-to-set-up-a-firewall-with-ufw-on-debian-10) for more information on setting up UFW.
+
 ## Verifying
 
 This section isn't strictly necessary by any means - if you use all the elements in the guide, a good experience in Open WebUI means you've succeeded with the goal of the guide. However, it can be helpful to test the disparate installations at different stages in this process.
@@ -732,6 +781,16 @@ If you see the `speech.mp3` file in the OpenedAI Speech directory, you should be
 sudo apt install aplay
 aplay speech.mp3
 ```
+
+### Kokoro FastAPI
+
+To test the API, run:
+```
+curl -s http://localhost:8880/v1/audio/speech -H "Content-Type: application/json" -d '{
+    "input": "The quick brown fox jumped over the lazy dog."}' > speech.mp3
+```
+
+To test the web UI, visit `http://localhost:7860`.
 
 ### ComfyUI
 
@@ -792,6 +851,15 @@ docker run -d --name watchtower --volume /var/run/docker.sock:/var/run/docker.so
 Navigate to the directory and pull the latest image from Docker:
 ```
 cd openedai-speech
+sudo docker compose pull
+sudo docker compose up -d
+```
+
+### Kokoro FastAPI
+
+Navigate to the directory and pull the latest image from Docker:
+```
+cd Kokoro-FastAPI
 sudo docker compose pull
 sudo docker compose up -d
 ```
