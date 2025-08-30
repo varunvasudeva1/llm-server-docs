@@ -174,12 +174,12 @@ Docker is a containerization platform that allows you to run applications in iso
 - Create an authentication token on https://huggingface.com
 - Log in to HF Hub:
     ```
-    huggingface-cli login
+    hf auth login'
     ```
 - Enter your token when prompted.
 - Run the following to verify your login:
     ```
-    huggingface-cli whoami
+    hf auth whoami
     ```
 
     The result should be your username.
