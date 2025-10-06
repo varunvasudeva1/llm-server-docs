@@ -3,7 +3,7 @@
 _TL;DR_: A comprehensive guide to setting up a fully local and private language model server equipped with the following:
 - Inference Engine ([Ollama](https://github.com/ollama/ollama), [llama.cpp](https://github.com/ggml-org/llama.cpp), [vLLM](https://github.com/vllm-project/vllm))
 - Chat Platform ([Open WebUI](https://github.com/open-webui/open-webui))
-- Text-to-Speech Server ([OpenedAI Speech](https://github.com/matatonic/openedai-speech), [Kokoro FastAPI](https://github.com/remsky/Kokoro-FastAPI))
+- Text-to-Speech Server ([Kokoro FastAPI](https://github.com/remsky/Kokoro-FastAPI))
 - Text-to-Image Server ([ComfyUI](https://github.com/comfyanonymous/ComfyUI))
 
 ## Table of Contents
@@ -35,11 +35,8 @@ _TL;DR_: A comprehensive guide to setting up a fully local and private language 
   - [Chat Platform](#chat-platform)
     - [Open WebUI](#open-webui)
   - [Text-to-Speech Server](#text-to-speech-server)
-    - [OpenedAI Speech](#openedai-speech)
-      - [Downloading Voices](#downloading-voices)
     - [Kokoro FastAPI](#kokoro-fastapi)
     - [Open WebUI Integration](#open-webui-integration-1)
-    - [Comparison](#comparison)
   - [Text-to-Image Server](#text-to-image-server)
     - [ComfyUI](#comfyui)
       - [Open WebUI Integration](#open-webui-integration-2)
@@ -63,7 +60,6 @@ _TL;DR_: A comprehensive guide to setting up a fully local and private language 
     - [llama.cpp](#llamacpp-1)
     - [vLLM](#vllm-1)
     - [Open WebUI](#open-webui-2)
-    - [OpenedAI Speech](#openedai-speech-1)
     - [Kokoro FastAPI](#kokoro-fastapi-1)
     - [ComfyUI](#comfyui-2)
   - [Troubleshooting](#troubleshooting)
@@ -72,7 +68,6 @@ _TL;DR_: A comprehensive guide to setting up a fully local and private language 
     - [Ollama](#ollama-2)
     - [vLLM](#vllm-2)
     - [Open WebUI](#open-webui-3)
-    - [OpenedAI Speech](#openedai-speech-2)
   - [Monitoring](#monitoring)
   - [Notes](#notes)
     - [Software](#software)
@@ -621,83 +616,6 @@ Read more about Open WebUI [here](https://github.com/open-webui/open-webui).
 > [!NOTE]
 > `host.docker.internal` is a magic hostname that resolves to the internal IP address assigned to the host by Docker. This allows containers to communicate with services running on the host, such as databases or web servers, without needing to know the host's IP address. It simplifies communication between containers and host-based services, making it easier to develop and deploy applications.
 
-> [!NOTE]
-> The TTS engine is set to `OpenAI` because OpenedAI Speech is OpenAI-compatible. There is no data transfer between OpenAI and OpenedAI Speech - the API is simply a wrapper around Piper and XTTS.
-
-### OpenedAI Speech
-
-🌟 [**GitHub**](https://github.com/matatonic/openedai-speech)
-
-OpenedAI Speech is a text-to-speech server that wraps [Piper TTS](https://github.com/rhasspy/piper) and [Coqui XTTS v2](https://docs.coqui.ai/en/latest/models/xtts.html) in an OpenAI-compatible API. This is great because it plugs in easily to the Open WebUI interface, giving your models the ability to speak their responses.
-
-> As of v0.17 (compared to v0.10), OpenedAI Speech features a far more straightforward and automated Docker installation, making it easy to get up and running.
-
-Piper TTS is a lightweight model that is great for quick responses - it can also run CPU-only inference, which may be a better fit for systems that need to reserve as much VRAM for language models as possible. XTTS is a more performant model that requires a GPU for inference. Piper is:
-
-1) generally easier to setup with out-of-the-box CUDA acceleration, and,
-2) has a plethora of voices that can be found [here](https://rhasspy.github.io/piper-samples/), so it's what I would suggest starting with.
-
-- To install OpenedAI Speech, first clone the repository and navigate to the directory:
-    ```
-    git clone https://github.com/matatonic/openedai-speech
-    cd openedai-speech
-    ```
-- Copy the `sample.env` file to `speech.env`:
-    ```
-    cp sample.env speech.env
-    ```
-- Run the following command to start the server.
-  - Nvidia GPUs
-    ```
-    sudo docker compose up -d
-    ```
-  - AMD GPUs
-    ```
-    sudo docker compose -d docker-compose.rocm.yml up
-    ```
-  - CPU only
-    ```
-    sudo docker compose -f docker-compose.min.yml up
-    ```
-
-OpenedAI Speech runs on `0.0.0.0:8000` by default. You can access it by navigating to `http://localhost:8000` in your browser or `http://<server_IP>:8000` from another device on the same network without any additional changes.
-
-#### Downloading Voices
-
-We'll use Piper here because I haven't found any good resources for high quality .wav files for XTTS. The process is the same for both models, just replace `tts-1` with `tts-1-hd` in the following commands. We'll download the `en_GB-alba-medium` voice as an example.
-
-- Create a new virtual environment named `speech` and activate it. Then, install `piper-tts`:
-    ```
-    python3 -m venv speech
-    source speech/bin/activate
-    pip install piper-tts
-    ```
-    This is a minimal virtual environment that is only required to run the script that downloads voices.
-- Download the voice:
-    ```
-    bash download_voices_tts-1.sh en_GB-alba-medium
-    ```
-- Update the `voice_to_speaker.yaml` file to include the voice you downloaded. This file maps the voice to a speaker name that can be used in the Open WebUI interface. For example, to map the `en_GB-alba-medium` voice to the speaker name `alba`, add the following lines to the file:
-    ```
-    alba:
-        model: voices/en_GB-alba-medium.onnx
-        speaker: # default speaker
-    ```
-- Run the following command:
-    ```
-    sudo docker ps -a
-    ```
-    Identify the container IDs of
-    1) OpenedAI Speech
-    2) Open WebUI
-
-    Restart both containers:
-    ```
-    sudo docker restart <openedai_speech_container_ID>
-    sudo docker restart <open_webui_container_ID>
-    ```
-    > Replace `<openedai_speech_container_ID>` and `<open_webui_container_ID>` with the container IDs you identified.
-
 ### Kokoro FastAPI
 
 🌟 [**GitHub**](https://github.com/remsky/Kokoro-FastAPI)
@@ -717,13 +635,6 @@ The server can be used in two ways: an API and a UI. By default, the API is serv
 
 Navigate to `Admin Panel > Settings > Audio` and set the following values:
 
-**OpenedAI Speech**
-- Text-to-Speech Engine: `OpenAI`
-- API Base URL: `http://host.docker.internal:8000/v1`
-- API Key: `anything-you-like`
-- Set Model: `tts-1` (for Piper) or `tts-1-hd` (for XTTS)
-
-**Kokoro FastAPI**
 - Text-to-Speech Engine: `OpenAI`
 - API Base URL: `http://host.docker.internal:8880/v1`
 - API Key: `anything-you-like`
@@ -731,20 +642,6 @@ Navigate to `Admin Panel > Settings > Audio` and set the following values:
 - Response Splitting: None (this is crucial - Kokoro uses a novel audio splitting system)
 
 The server can be used in two ways: an API and a UI. By default, the API is served on port 8880 and the UI is served on port 7860.
-
-### Comparison
-
-You may choose OpenedAI Speech over Kokoro because:
-
-1) **Voice Cloning**: xTTS v2 offers extensive support for cloning voices with small samples of audio.
-2) **Choice of Voices**: Piper offers a very large variety of voices across multiple languages, dialects, and accents.
-
-You may choose Kokoro over OpenedAI Speech because:
-
-1) Natural Tone: Kokoro's voices are very natural sounding and offer a better experience than Piper. While Piper has high quality voices, the text can sound robotic when reading out complex words/sentences.
-2) Advanced Splitting: Kokoro splits responses up in a better format, making any pauses in speech feel more real. It also natively skips over Markdown formatting like lists and asterisks for bold/italics.
-
-Kokoro's performance makes it an ideal candidate for regular use as a voice assistant chained to a language model in Open WebUI.
 
 ## Text-to-Image Server
 
@@ -1020,15 +917,6 @@ To keep it updated automatically, run the following command:
 docker run -d --name watchtower --volume /var/run/docker.sock:/var/run/docker.sock containrrr/watchtower open-webui
 ```
 
-### OpenedAI Speech
-
-Navigate to the directory and pull the latest image from Docker:
-```
-cd openedai-speech
-sudo docker compose pull
-sudo docker compose up -d
-```
-
 ### Kokoro FastAPI
 
 Navigate to the directory and pull the latest image from Docker:
@@ -1090,32 +978,6 @@ For any service running in a container, you can check the logs by running `sudo 
 
 ### Open WebUI
 - If you encounter `Ollama: llama runner process has terminated: signal: killed`, check your `Advanced Parameters`, under `Settings > General > Advanced Parameters`. For me, bumping the context length past what certain models could handle was breaking the Ollama server. Leave it to the default (or higher, but make sure it's still under the limit for the model you're using) to fix this issue.
-
-### OpenedAI Speech
-- If you encounter `docker: Error response from daemon: Unknown runtime specified nvidia.` when running `docker compose up -d`, ensure that you have `nvidia-container-toolkit` installed (this was previously `nvidia-docker2`, which is now deprecated). If not, installation instructions can be found [here](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html). Make sure to reboot the server after installing the toolkit. If you still encounter issues, ensure that your system has a valid CUDA installation by running `nvcc --version`.
-- If `nvcc --version` doesn't return a valid response despite following Nvidia's installation guide, the issue is likely that CUDA is not in your PATH variable.
-    Run the following command to edit your `.bashrc` file:
-    ```
-    sudo nano /home/<username>/.bashrc
-    ```
-    > Replace `<username>` with your username.
-    Add the following to your `.bashrc` file:
-    ```
-    export PATH="/usr/local/<cuda_version>/bin:$PATH"
-    export LD_LIBRARY_PATH="/usr/local/<cuda_version>/lib64:$LD_LIBRARY_PATH"
-    ```
-    > Replace `<cuda_version>` with your installation's version. If you're unsure of which version, run `ls /usr/local` to find the CUDA directory. It is the directory with the `cuda` prefix, followed by the version number. 
-    
-    Save and exit the file, then run `source /home/<username>/.bashrc` to apply the changes (or close the current terminal and open a new one). Run `nvcc --version` again to verify that CUDA is now in your PATH. You should see something like the following:
-    ```
-    nvcc: NVIDIA (R) Cuda compiler driver
-    Copyright (c) 2005-2024 NVIDIA Corporation
-    Built on Thu_Mar_28_02:18:24_PDT_2024
-    Cuda compilation tools, release 12.4, V12.4.131
-    Build cuda_12.4.r12.4/compiler.34097967_0
-    ```
-    If you see this, CUDA is now in your PATH and you can run `docker compose up -d` again.
-- If you run into a `VoiceNotFoundError`, you may either need to download the voices again or the voices may not be compatible with the model you're using. Make sure to check your `speech.env` file to ensure that the `PRELOAD_MODEL` and `CLI_COMMAND` lines are configured correctly.
 
 ## Monitoring
 
@@ -1188,7 +1050,6 @@ Docs:
 - [Ollama](https://github.com/ollama/ollama/blob/main/docs/api.md)
 - [vLLM](https://docs.vllm.ai/en/stable/index.html)
 - [Open WebUI](https://github.com/open-webui/open-webui)
-- [OpenedAI Speech](https://github.com/matatonic/openedai-speech)
 - [ComfyUI](https://github.com/comfyanonymous/ComfyUI)
 
 ## Acknowledgements
