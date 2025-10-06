@@ -4,7 +4,7 @@ _TL;DR_: A comprehensive guide to setting up a fully local and private language 
 - Inference Engine ([Ollama](https://github.com/ollama/ollama), [llama.cpp](https://github.com/ggml-org/llama.cpp), [vLLM](https://github.com/vllm-project/vllm))
 - Chat Platform ([Open WebUI](https://github.com/open-webui/open-webui))
 - Text-to-Speech Server ([Kokoro FastAPI](https://github.com/remsky/Kokoro-FastAPI))
-- Text-to-Image Server ([ComfyUI](https://github.com/comfyanonymous/ComfyUI))
+- Image Generation Server ([ComfyUI](https://github.com/comfyanonymous/ComfyUI))
 
 ## Table of Contents
 
@@ -12,18 +12,18 @@ _TL;DR_: A comprehensive guide to setting up a fully local and private language 
   - [Table of Contents](#table-of-contents)
   - [About](#about)
   - [Priorities](#priorities)
-  - [System Requirements](#system-requirements)
   - [Prerequisites](#prerequisites)
-    - [Docker](#docker)
-    - [HuggingFace CLI](#huggingface-cli)
-      - [Managing Models](#managing-models)
-      - [Download Models](#download-models)
-      - [Delete Models](#delete-models)
   - [General](#general)
-  - [Startup Script](#startup-script)
-    - [Scheduling Startup Script](#scheduling-startup-script)
-    - [Configuring Script Permissions](#configuring-script-permissions)
-  - [Auto-Login](#auto-login)
+    - [Schedule Startup Script](#schedule-startup-script)
+    - [Configure Script Permissions](#configure-script-permissions)
+    - [Configure Auto-Login (optional)](#configure-auto-login-optional)
+  - [Docker](#docker)
+    - [Nvidia Container Toolkit](#nvidia-container-toolkit)
+    - [Helpful Commands](#helpful-commands)
+  - [HuggingFace CLI](#huggingface-cli)
+    - [Manage Models](#manage-models)
+    - [Download Models](#download-models)
+    - [Delete Models](#delete-models)
   - [Inference Engine](#inference-engine)
     - [Ollama](#ollama)
     - [llama.cpp](#llamacpp)
@@ -37,7 +37,7 @@ _TL;DR_: A comprehensive guide to setting up a fully local and private language 
   - [Text-to-Speech Server](#text-to-speech-server)
     - [Kokoro FastAPI](#kokoro-fastapi)
     - [Open WebUI Integration](#open-webui-integration-1)
-  - [Text-to-Image Server](#text-to-image-server)
+  - [Image Generation Server](#image-generation-server)
     - [ComfyUI](#comfyui)
       - [Open WebUI Integration](#open-webui-integration-2)
   - [SSH](#ssh)
@@ -81,30 +81,37 @@ This repository outlines the steps to run a server for running local language mo
 
 The process involves installing the requisite drivers, setting the GPU power limit, setting up auto-login, and scheduling the `init.bash` script to run at boot. All these settings are based on my ideal setup for a language model server that runs most of the day but a lot can be customized to suit your needs.
 
+> [!IMPORTANT]
+> No part of this guide was written using AI - any hallucinations are the good old human kind. While I've done my absolute best to ensure correctness in every step/command, check **everything** you execute in a terminal. Enjoy!
+
 ## Priorities
 
 - **Simplicity of setup process**: It should be relatively straightforward to set up the components of the solution.
 - **Stability of runtime**: The components should be stable and capable of running for weeks at a time without any intervention necessary.
 - **Ease of maintenance**: The components and their interactions should be uncomplicated enough that you know enough to maintain them as they evolve (because they *will* evolve).
 - **Aesthetics**: The result should be as close to a cloud provider's chat platform as possible. A homelab solution doesn't necessarily need to feel like it was cobbled together haphazardly.
+- **Modularity**: Components in the setup should be able to be swapped out for newer/more performant/better maintained alternatives easily. Standard protocols (OpenAI-compatibility, MCPs, etc.) help with this a lot and, in this guide, they are always preferred over bundled solutions.
 - **Open source**: The code should be able to be verified by a community of engineers. Chat platforms and LLMs involve large amounts of personal data conveyed in natural language and it's important to know that data isn't going outside your machine.
 
-## System Requirements
+## Prerequisites
 
 Any modern CPU and GPU combination should work for this guide. Previously, compatibility with AMD GPUs was an issue but the latest releases of Ollama have worked through this and [AMD GPUs are now supported natively](https://ollama.com/blog/amd-preview). 
 
 For reference, this guide was built around the following system:
 - **CPU**: Intel Core i5-12600KF
-- **Memory**: 32GB 6000 MHz DDR5 RAM
+- **Memory**: 64GB 3200MHz DDR4 RAM
 - **Storage**: 1TB M.2 NVMe SSD
-- **GPU**: Nvidia RTX 3090 24GB
+- **GPU**: Nvidia RTX 3090 (24GB), Nvidia RTX 3060 (12GB)
 
 > [!NOTE]
 > **AMD GPUs**: Power limiting is skipped for AMD GPUs as [AMD has recently made it difficult to set power limits on their GPUs](https://www.reddit.com/r/linux_gaming/comments/1b6l1tz/no_more_power_limiting_for_amd_gpus_because_it_is/). Naturally, skip any steps involving `nvidia-smi` or `nvidia-persistenced` and the power limit in the `init.bash` script.
 > 
 > **CPU-only**: You can skip the GPU driver installation and power limiting steps. The rest of the guide should work as expected.
 
-## Prerequisites
+> [!NOTE]
+> This guide uses `~/` (or `/home/<your_username>`) as the base directory. If you're working in different directory, please modify all your commands accordingly.
+
+To begin the process of setting up your server, you will need the following:
 
 - Fresh install of Debian
 - Internet connection
@@ -121,96 +128,8 @@ For a more detailed guide on installing Debian, refer to the [official documenta
 
 I also recommend installing a lightweight desktop environment like XFCE for ease of use. Other options like GNOME or KDE are also available - GNOME may be a better option for those using their server as a primary workstation as it is more feature-rich (and, as such, heavier) than XFCE.
 
-### Docker
-
-Docker is a containerization platform that allows you to run applications in isolated environments. This subsection follows [this guide](https://docs.docker.com/engine/install/debian/) to install Docker Engine on Debian.
-
-- Run the following commands:
-    ```
-    # Add Docker's official GPG key:
-    sudo apt-get update
-    sudo apt-get install ca-certificates curl
-    sudo install -m 0755 -d /etc/apt/keyrings
-    sudo curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
-    sudo chmod a+r /etc/apt/keyrings/docker.asc
-
-    # Add the repository to Apt sources:
-    echo \
-    "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian \
-    $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
-    sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-    sudo apt-get update
-    ```
-- Install the Docker packages:
-    ```
-    sudo apt-get install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-    ```
-- Verify the installation:
-    ```
-    sudo docker run hello-world
-    ```
-
-### HuggingFace CLI
-
-📖 [**Documentation**](https://huggingface.co/docs/huggingface_hub/main/en/guides/cli)
-
-> [!NOTE]
-> Only needed for llama.cpp/vLLM.
-
-- Create a new virtual environment:
-    ```
-    python3 -m venv hf-env
-    source hf-env/bin/activate
-    ```
-- Download the `huggingface_hub[cli]` package using `pip`:
-    ```
-    pip install -U "huggingface_hub[cli]"
-    ```
-- Create an authentication token on https://huggingface.com
-- Log in to HF Hub:
-    ```
-    huggingface-cli login
-    ```
-- Enter your token when prompted.
-- Run the following to verify your login:
-    ```
-    huggingface-cli whoami
-    ```
-
-    The result should be your username.
-
-#### Managing Models
-
-Models can be downloaded either to the default location (`.cache/huggingface/hub`) or to any local directory you specify. Where the model is stored can be defined using the `--local-dir` command line flag. Not specifying this will result in the model being stored in the default location. Storing the model in the folder where the packages for the inference engine are stored is good practice - this way, everything you need to run inference on a model is stored in the same place. However, if you use the same models with multiple backends frequently (e.g. using Qwen_QwQ-32B-Q4_K_M.gguf with both llama.cpp and vLLM), the default location is probably best.
-
-First, activate the virtual environment that contains `huggingface_hub`:
-```
-source hf-env/bin/activate
-```
-
-#### Download Models
-
-Models are downloaded using their HuggingFace tag. Here, we'll use bartowski/Qwen_QwQ-32B-GGUF as an example. To download a model, run:
-```
-huggingface-cli download bartowski/Qwen_QwQ-32B-GGUF Qwen_QwQ-32B-Q4_K_M.gguf --local-dir models
-```
-Ensure that you are in the correct directory when you run this.
-
-#### Delete Models
-
-To delete a model in the specified location, run:
-```
-rm <model_name>
-```
-
-To delete a model in the default location, run:
-```
-huggingface-cli delete-cache
-```
-
-This will start an interactive session where you can remove models from the HuggingFace directory. In case you've been saving models in a different location than `.cache/huggingface`, deleting models from there will free up space but the metadata will remain in the HF cache until it is deleted properly. This can be done via the above command but you can also simply delete the model directory from `.cache/huggingface/hub`.
-
 ## General
+
 Update the system by running the following commands:
 ```
 sudo apt update
@@ -240,17 +159,22 @@ Now, we'll install the required GPU drivers that allow programs to utilize their
     ```
 - Reboot the server.
 
-## Startup Script
+We'll also install some packages that are not installed on Debian by default but may be required later:
+```
+sudo apt install libcurl cmake
+```
+
+### Schedule Startup Script
 
 In this step, we'll create a script called `init.bash`. This script will be run at boot to set the GPU power limit and start the server using Ollama. We set the GPU power limit lower because it has been seen in testing and inference that there is only a 5-15% performance decrease for a 30% reduction in power consumption. This is especially important for servers that are running 24/7.
 
 - Run the following commands:
-    ```
+    ```bash
     touch init.bash
     nano init.bash
     ```
 - Add the following lines to the script:
-    ```
+    ```bash
     #!/bin/bash
     sudo nvidia-smi -pm 1
     sudo nvidia-smi -pl <power_limit>
@@ -258,44 +182,42 @@ In this step, we'll create a script called `init.bash`. This script will be run 
     > Replace `<power_limit>` with the desired power limit in watts. For example, `sudo nvidia-smi -pl 250`.
 
     For multiple GPUs, modify the script to set the power limit for each GPU:
-    ```
+    ```bash
     sudo nvidia-smi -i 0 -pl <power_limit>
     sudo nvidia-smi -i 1 -pl <power_limit>
     ```
 - Save and exit the script.
 - Make the script executable:
-    ```
+    ```bash
     chmod +x init.bash
     ```
-
-### Scheduling Startup Script
 
 Adding the `init.bash` script to the crontab will schedule it to run at boot.
 
 - Run the following command:
-    ```
+    ```bash
     crontab -e
     ```
 - Add the following line to the file:
-    ```
+    ```bash
     @reboot /path/to/init.bash
     ```
     > Replace `/path/to/init.bash` with the path to the `init.bash` script.
 
 - (Optional) Add the following line to shutdown the server at 12am:
-    ```
+    ```bash
     0 0 * * * /sbin/shutdown -h now
     ```
 - Save and exit the file.
 
-### Configuring Script Permissions
+### Configure Script Permissions
 
 We want `init.bash` to run the `nvidia-smi` commands without having to enter a password. This is done by giving `nvidia-persistenced` and `nvidia-smi` passwordless `sudo` permissions, and can be achieved by editing the `sudoers` file.
 
 AMD users can skip this step as power limiting is not supported on AMD GPUs.
 
 - Run the following command:
-    ```
+    ```bash
     sudo visudo
     ```
 - Add the following lines to the file:
@@ -309,12 +231,12 @@ AMD users can skip this step as power limiting is not supported on AMD GPUs.
 > [!IMPORTANT]
 > Ensure that you add these lines AFTER `%sudo ALL=(ALL:ALL) ALL`. The order of the lines in the file matters - the last matching line will be used so if you add these lines before `%sudo ALL=(ALL:ALL) ALL`, they will be ignored.
 
-## Auto-Login
+### Configure Auto-Login (optional)
 
 When the server boots up, we want it to automatically log in to a user account and run the `init.bash` script. This is done by configuring the `lightdm` display manager.
 
 - Run the following command:
-    ```
+    ```bash
     sudo nano /etc/lightdm/lightdm.conf
     ```
 - Find the following commented line. It should be in the `[Seat:*]` section.
@@ -327,6 +249,145 @@ When the server boots up, we want it to automatically log in to a user account a
     ```
     > Replace `<username>` with your username.
 - Save and exit the file.
+
+## Docker
+
+📖 [**Documentation**](https://docs.docker.com/engine/)
+
+Docker is a containerization platform that allows you to run applications in isolated environments. This subsection follows [Docker's guide](https://docs.docker.com/engine/install/debian/) to install Docker Engine on Debian. The commands are listed below, but visiting the guide is recommended in case instructions have changed.
+
+- If you already have a Docker installation on your system, it's a good idea to re-install so there are no broken/out-of-date dependencies. The command below will iterate through your system's installed packages and remove the ones associated with Docker.
+    ```
+    for pkg in docker.io docker-doc docker-compose podman-docker containerd runc; do sudo apt-get remove $pkg; done
+    ```
+
+- Run the following commands:
+    ```bash
+    # Add Docker's official GPG key:
+    sudo apt-get update
+    sudo apt-get install ca-certificates curl
+    sudo install -m 0755 -d /etc/apt/keyrings
+    sudo curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
+    sudo chmod a+r /etc/apt/keyrings/docker.asc
+
+    # Add the repository to Apt sources:
+    echo \
+    "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian \
+    $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+    sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+    sudo apt-get update
+    ```
+- Install the Docker packages:
+    ```bash
+    sudo apt-get install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+    ```
+- Verify the installation:
+    ```bash
+    sudo docker run hello-world
+    ```
+
+### Nvidia Container Toolkit
+
+You will most likely want to use GPUs via Docker - this will require Nvidia Container Toolkit, which allows Docker to allocate/de-allocate memory on Nvidia GPUs. The steps for installing this are listed below, but it is recommended to reference [Nvidia's documentation](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html) for the most up-to-date commands.
+
+1. Configure the repository
+    ```bash
+    curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg \
+    && curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | \
+        sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' | \
+        sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
+    ```
+
+2. Update packages:
+    ```bash
+    sudo apt-get update
+    ```
+
+3. Install Nvidia Container Toolkit packages:
+    ```bash
+    export NVIDIA_CONTAINER_TOOLKIT_VERSION=1.17.8-1
+    sudo apt-get install -y \
+        nvidia-container-toolkit=${NVIDIA_CONTAINER_TOOLKIT_VERSION} \
+        nvidia-container-toolkit-base=${NVIDIA_CONTAINER_TOOLKIT_VERSION} \
+        libnvidia-container-tools=${NVIDIA_CONTAINER_TOOLKIT_VERSION} \
+        libnvidia-container1=${NVIDIA_CONTAINER_TOOLKIT_VERSION}
+    ```
+
+### Helpful Commands
+
+In the process of setting up this server (or anywhere down the rabbit hole of setting up services), you're likely to use Docker often. For the uninititated, here are helpful commands that will make navigating and troubleshooting containers easier:
+
+- See available/running containers: `sudo docker ps -a`
+- Restart a container: `sudo docker restart <container_name>`
+- View a container's logs (live): `sudo docker logs -f <container_name>` (`CTRL+C` to quit)
+- Rename a container: `sudo docker rename <container_name> <new_container_name>`
+- Sometimes, a single service will spin up multiple containers, e.g. `xyz-server` and `xyz-db`. To restart both simultaneously, run the following command **from inside the directory containing the Compose file**: `sudo docker compose restart`
+
+> [!TIP]
+> There's no rules when it comes to how you set up your Docker containers/services. However, here are my two cents:  
+> It's cleanest to use Docker Compose (`sudo docker compose up -d` with a `docker-compose.yaml` file as opposed to `sudo docker run -d <image_name>`). Unless you take copious notes on your homelab and its setup, this method is almost self-documenting and keeps a neat trail of the services you run via their compose files. One compose file per directory is standard.
+
+## HuggingFace CLI
+
+📖 [**Documentation**](https://huggingface.co/docs/huggingface_hub/main/en/guides/cli)
+
+HuggingFace is the leading open-source ML/AI platform - it hosts models (including LLMs), datasets, and demo apps that can be used to test models. For the purpose of this guide, we'll be using HuggingFace to download popular open-source LLMs. 
+
+> [!NOTE]
+> Only needed for llama.cpp/vLLM.
+
+- Create a new virtual environment:
+    ```bash
+    python3 -m venv hf-env
+    source hf-env/bin/activate
+    ```
+- Download the `huggingface_hub` package using `pip`:
+    ```bash
+    pip install -U "huggingface_hub[cli]"
+    ```
+- Create an authentication token on https://huggingface.com
+- Log in to HF Hub:
+    ```bash
+    hf auth login
+    ```
+- Enter your token when prompted.
+- Run the following to verify your login:
+    ```bash
+    hf auth whoami
+    ```
+
+    The result should be your username.
+
+### Manage Models
+
+Models can be downloaded either to the default location (`.cache/huggingface/hub`) or to any local directory you specify. Where the model is stored can be defined using the `--local-dir` command line flag. Not specifying this will result in the model being stored in the default location. Storing the model in the folder where the packages for the inference engine are stored is good practice - this way, everything you need to run inference on a model is stored in the same place. However, if you use the same models with multiple backends frequently (e.g. using Qwen_QwQ-32B-Q4_K_M.gguf with both llama.cpp and vLLM), either set a common model directory or use the default HF option without specifying this flag.
+
+First, activate the virtual environment that contains `huggingface_hub`:
+```
+source hf-env/bin/activate
+```
+
+### Download Models
+
+Models are downloaded using their HuggingFace tag. Here, we'll use bartowski/Qwen_QwQ-32B-GGUF as an example. To download a model, run:
+```
+hf download bartowski/Qwen_QwQ-32B-GGUF Qwen_QwQ-32B-Q4_K_M.gguf --local-dir models
+```
+Ensure that you are in the correct directory when you run this.
+
+### Delete Models
+
+To delete a model in the specified location, run:
+```
+rm <model_name>
+```
+
+To delete a model in the default location, run:
+```
+hf delete-cache
+```
+
+This will start an interactive session where you can remove models from the HuggingFace directory. In case you've been saving models in a different location than `.cache/huggingface`, deleting models from there will free up space but the metadata will remain in the HF cache until it is deleted properly. This can be done via the above command but you can also simply delete the model directory from `.cache/huggingface/hub`.
 
 ## Inference Engine
 
@@ -643,7 +704,7 @@ Navigate to `Admin Panel > Settings > Audio` and set the following values:
 
 The server can be used in two ways: an API and a UI. By default, the API is served on port 8880 and the UI is served on port 7860.
 
-## Text-to-Image Server
+## Image Generation Server
 
 ### ComfyUI
 
