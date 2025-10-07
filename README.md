@@ -28,18 +28,21 @@ _TL;DR_: A comprehensive guide to setting up a fully local and private language 
     - [Ollama](#ollama)
     - [llama.cpp](#llamacpp)
     - [vLLM](#vllm)
-    - [Creating a Service](#creating-a-service)
     - [Open WebUI Integration](#open-webui-integration)
     - [Ollama vs. llama.cpp](#ollama-vs-llamacpp)
     - [vLLM vs. Ollama/llama.cpp](#vllm-vs-ollamallamacpp)
+  - [Model Server](#model-server)
+    - [llama-swap](#llama-swap)
+      - [Open WebUI Integration](#open-webui-integration-1)
+    - [`systemd` Service](#systemd-service)
   - [Chat Platform](#chat-platform)
     - [Open WebUI](#open-webui)
   - [Text-to-Speech Server](#text-to-speech-server)
     - [Kokoro FastAPI](#kokoro-fastapi)
-    - [Open WebUI Integration](#open-webui-integration-1)
+    - [Open WebUI Integration](#open-webui-integration-2)
   - [Image Generation Server](#image-generation-server)
     - [ComfyUI](#comfyui)
-      - [Open WebUI Integration](#open-webui-integration-2)
+      - [Open WebUI Integration](#open-webui-integration-3)
   - [SSH](#ssh)
   - [Firewall](#firewall)
   - [Remote Access](#remote-access)
@@ -86,9 +89,9 @@ The process involves installing the requisite drivers, setting the GPU power lim
 
 ## Priorities
 
-- **Simplicity of setup process**: It should be relatively straightforward to set up the components of the solution.
-- **Stability of runtime**: The components should be stable and capable of running for weeks at a time without any intervention necessary.
-- **Ease of maintenance**: The components and their interactions should be uncomplicated enough that you know enough to maintain them as they evolve (because they *will* evolve).
+- **Simplicity**: It should be relatively straightforward to set up the components of the solution.
+- **Stability**: The components should be stable and capable of running for weeks at a time without any intervention necessary.
+- **Maintainability**: The components and their interactions should be uncomplicated enough that you know enough to maintain them as they evolve (because they *will* evolve).
 - **Aesthetics**: The result should be as close to a cloud provider's chat platform as possible. A homelab solution doesn't necessarily need to feel like it was cobbled together haphazardly.
 - **Modularity**: Components in the setup should be able to be swapped out for newer/more performant/better maintained alternatives easily. Standard protocols (OpenAI-compatibility, MCPs, etc.) help with this a lot and, in this guide, they are always preferred over bundled solutions.
 - **Open source**: The code should be able to be verified by a community of engineers. Chat platforms and LLMs involve large amounts of personal data conveyed in natural language and it's important to know that data isn't going outside your machine.
@@ -526,11 +529,162 @@ To serve a different model:
     --model <model>
     ```
 
-### Creating a Service
+### Open WebUI Integration
 > [!NOTE]
-> Only needed for manual installations of llama.cpp/vLLM.
+> Only needed for llama.cpp/vLLM.
 
-While the above steps will help you get up and running with an OpenAI-compatible LLM server, they will not help with this server persisting after you close your terminal window or restart your physical server. Docker can achieve this with the `-d` (for "detach") flag but running vanilla Python servers is common. To do this, we must start the inference engine in a `.service` file that will run alongside the Linux operating system when booting, ensuring that it is available whenever the server is on.
+Navigate to `Admin Panel > Settings > Connections` and set the following values:
+
+- Enable OpenAI API
+- API Base URL: `http://host.docker.internal:<port>/v1`
+- API Key: `anything-you-like`
+
+> [!NOTE]
+> `host.docker.internal` is a magic hostname that resolves to the internal IP address assigned to the host by Docker. This allows containers to communicate with services running on the host, such as databases or web servers, without needing to know the host's IP address. It simplifies communication between containers and host-based services, making it easier to develop and deploy applications.
+
+### Ollama vs. llama.cpp
+
+| **Aspect**                 | **Ollama (Wrapper)**                                          | **llama.cpp (Vanilla)**                                                                   |
+| -------------------------- | ------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| **Installation/Setup**     | One-click install & CLI model management                      | Requires manual setup/configuration                                                       |
+| **Open WebUI Integration** | First-class citizen                                           | Requires OpenAI-compatible endpoint setup                                                 |
+| **Model Switching**        | Native model-switching via server                             | Requires manual port management or [llama-swap](https://github.com/mostlygeek/llama-swap) |
+| **Customizability**        | Limited: Modelfiles are cumbersome                            | Full control over parameters via CLI                                                      |
+| **Transparency**           | Defaults may override model parameters (e.g., context length) | Full transparency in parameter settings                                                   |
+| **GGUF Support**           | Inherits llama.cpp's best-in-class implementation             | Best GGUF implementation                                                                  |
+| **GPU-CPU Splitting**      | Inherits llama.cpp's efficient splitting                      | Trivial GPU-CPU splitting out-of-the-box                                                  |
+
+---
+
+### vLLM vs. Ollama/llama.cpp
+| **Feature**             | **vLLM**                                     | **Ollama/llama.cpp**                                                                  |
+| ----------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------- |
+| **Vision Models**       | Supports Qwen 2.5 VL, Llama 3.2 Vision, etc. | Ollama supports some vision models, llama.cpp does not support any (via llama-server) |
+| **Quantization**        | Supports AWQ, GPTQ, BnB, etc.                | Only supports GGUF                                                                    |
+| **Multi-GPU Inference** | Yes                                          | Yes                                                                                   |
+| **Tensor Parallelism**  | Yes                                          | No                                                                                    |
+
+In summary,
+
+- **Ollama**: Best for those who want an "it just works" experience.
+- **llama.cpp**: Best for those who want total control over their inference servers and are familiar with engine arguments.
+- **vLLM**: Best for those who want (i) to run non-GGUF quantizations of models, (ii) multi-GPU inference using tensor parallelism, or (iii) to use vision models.
+
+Using Ollama as a service offers no degradation in experience because unused models are offloaded from VRAM after some time. Using vLLM or llama.cpp as a service keeps a model in memory, so I wouldn't use this alongside Ollama in an automated, always-on fashion unless it was your primary inference engine. Essentially,
+
+| Primary Engine | Secondary Engine | Run SE as service? |
+| -------------- | ---------------- | ------------------ |
+| Ollama         | llama.cpp/vLLM   | No                 |
+| llama.cpp/vLLM | Ollama           | Yes                |
+
+## Model Server
+
+> [!NOTE]
+> Only needed for manual installations of llama.cpp/vLLM. Ollama manages model management via its CLI.
+
+While the above steps will help you get up and running with an OpenAI-compatible LLM server, they will not help with this server persisting after you close your terminal window or restart your physical server. They also won't allow a chat platform to reliably reference and swap between the various models you have available - a likely use-case in a landscape where different models specialize in different tasks. Running the inference engine via Docker can achieve this persistence with the `-d` (for "detach") flag but (i) services like llama.cpp and vLLM are usually configured without Docker and (ii) it can't swap models on-demand. This necessitates a server that can manage loading/unloading, swapping, and listing available models.
+
+### llama-swap
+
+🌟 [**GitHub**](https://github.com/mostlygeek/llama-swap)  
+📖 [**Documentation**](https://github.com/mostlygeek/llama-swap/wiki)
+
+> [!TIP]
+> This is my recommended way to run llama.cpp/vLLM models.
+
+llama-swap is a lightweight proxy server for LLMs that solves our pain points from above. It's an extremely configurable tool that allows a single point of entry for models from various backends. Models can be set up in groups, listed/unlisted easily, configured with customized hyperparameters, and monitored using streamed logs in the llama-swap web UI.
+
+In the installation below, we'll use `Qwen3-4B-Instruct-2507-UD-Q4_K_XL.gguf` for llama.cpp and `Qwen/Qwen3-4B-Instruct-2507` for vLLM. We'll also use port 7000 to serve the models on.
+
+1. Create a new directory with the `config.yaml` file:
+    ```bash
+    sudo mkdir llama-swap
+    cd llama-swap
+    sudo nano config.yaml
+    ```
+
+2. Enter the following and save:
+
+    **llama.cpp**
+    ```yaml
+    models:
+        "qwen3-4b":
+            proxy: "http://127.0.0.1:7000"
+            cmd: |
+            /app/llama-server
+            -m /models/Qwen3-4B-Instruct-2507-UD-Q4_K_XL.gguf
+            # or use `-hf unsloth/Qwen3-4B-Instruct-2507-GGUF:Q4_K_XL` for HuggingFace
+            --port 7000
+    ```
+
+    **vLLM (Docker)**
+    ```yaml
+    models:
+        "qwen3-4b":
+            proxy: "http://127.0.0.1:7000"
+            cmd: |
+            docker run --name qwen-vllm
+            --init --rm -p 7000:8080
+            --ipc=host \
+            vllm/vllm-openai:latest
+            -m /models/Qwen/Qwen3-4B-Instruct-2507
+            cmdStop: docker stop qwen-vllm
+    ```
+
+    **vLLM (local)**:
+    ```yaml
+    models:
+        "qwen3-4b":
+            proxy: "http://127.0.0.1:7000"
+            cmd: |
+            source /app/vllm/.venv/bin/activate && \
+            /app/vllm/.venv/bin/vllm serve \
+            --port 7000 \
+            --host 0.0.0.0 \
+            -m /models/Qwen/Qwen3-4B-Instruct-2507
+            cmdStop: pkill -f "vllm serve"
+    ```
+
+3. Install the container:
+    
+    We use the `cuda` tag here, but llama-swap offers `cpu`, `intel`, `vulkan`, and `musa` tags as well. Releases can be found [here](https://github.com/mostlygeek/llama-swap/pkgs/container/llama-swap).
+
+    **llama.cpp**
+    ```bash
+    sudo docker run -d --gpus all --restart unless-stopped --network app-net --pull=always --name llama-swap -p 9292:8080 \
+    -v /path/to/models:/models \
+    -v /home/<your_username>/llama-swap/config.yaml:/app/config.yaml \
+    -v /home/<your_username>/llama.cpp/build/bin/llama-server:/app/llama-server \
+    ghcr.io/mostlygeek/llama-swap:cuda
+    ```
+
+    **vLLM (Docker/local)**
+    ```bash
+    sudo docker run -d --gpus all --restart unless-stopped --network app-net --pull=always --name llama-swap -p 9292:8080 \
+    -v /path/to/models:/models \
+    -v /home/<your_username>/vllm:/app/vllm \
+    -v /home/<your_username>/llama-swap/config.yaml:/app/config.yaml \
+    ghcr.io/mostlygeek/llama-swap:cuda
+    ```
+
+    > Replace <your_username> with your actual username and `/path/to/models` with the path to your model files.
+
+> [!NOTE]
+> llama-swap prefers Docker-based vLLM due to cleanliness of environments and adherence to SIGTERM signals sent by the server. I've written out both options here.
+
+This should result in a functioning llama-swap instance running at `http://localhost:9292`, which can be confirmed by running `curl http://localhost:9292/health`. It is **highly recommended** that you read the [configuration documentation](https://github.com/mostlygeek/llama-swap/wiki/Configuration). llama-swap is thoroughly documented and highly configurable - utilizing its capabilities will result in a tailored setup ready to deploy as you need it.
+
+#### Open WebUI Integration
+
+Navigate to `Admin Panel > Settings > Connections` and set the following values:
+
+- Enable OpenAI API
+- API Base URL: `http://host.docker.internal:9292/v1`
+- API Key: `anything-you-like`
+
+### `systemd` Service
+
+The other way to persist a model across system reboots is to start the inference engine in a `.service` file that will run alongside the Linux operating system when booting, ensuring that it is available whenever the server is on. If you're willing to live with the relative compromise of not being able to swap models/backends and are satisfied with running one model, this is the lowest overhead solution and works great.
 
 Let's call the service we're about to build `llm-server.service`. We'll assume all models are in the `models` child directory - you can change this as you need to.
 
@@ -589,65 +743,19 @@ Let's call the service we're about to build `llm-server.service`. We'll assume a
 4. Run the service:
 
     If `llm-server.service` doesn't exist:
-    ```
+    ```bash
     sudo systemctl enable llm-server.service
     sudo systemctl start llm-server
     ```
 
     If `llm-server.service` does exist:
-    ```
+    ```bash
     sudo systemctl restart llm-server
     ```
 5. (Optional) Check the service's status:
     ```bash
-    sudo systemctl status llama-server
+    sudo systemctl status llm-server
     ```
-
-### Open WebUI Integration
-> [!NOTE]
-> Only needed for llama.cpp/vLLM.
-
-Navigate to `Admin Panel > Settings > Connections` and set the following values:
-
-- Enable OpenAI API
-- API Base URL: `http://host.docker.internal:<port>/v1`
-- API Key: `anything-you-like`
-
-### Ollama vs. llama.cpp
-
-| **Aspect**                 | **Ollama (Wrapper)**                                          | **llama.cpp (Vanilla)**                                                                   |
-| -------------------------- | ------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| **Installation/Setup**     | One-click install & CLI model management                      | Requires manual setup/configuration                                                       |
-| **Open WebUI Integration** | First-class citizen                                           | Requires OpenAI-compatible endpoint setup                                                 |
-| **Model Switching**        | Native model-switching via server                             | Requires manual port management or [llama-swap](https://github.com/mostlygeek/llama-swap) |
-| **Customizability**        | Limited: Modelfiles are cumbersome                            | Full control over parameters via CLI                                                      |
-| **Transparency**           | Defaults may override model parameters (e.g., context length) | Full transparency in parameter settings                                                   |
-| **GGUF Support**           | Inherits llama.cpp's best-in-class implementation             | Best GGUF implementation                                                                  |
-| **GPU-CPU Splitting**      | Inherits llama.cpp's efficient splitting                      | Trivial GPU-CPU splitting out-of-the-box                                                  |
-
----
-
-### vLLM vs. Ollama/llama.cpp
-| **Feature**             | **vLLM**                                     | **Ollama/llama.cpp**                                                                  |
-| ----------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------- |
-| **Vision Models**       | Supports Qwen 2.5 VL, Llama 3.2 Vision, etc. | Ollama supports some vision models, llama.cpp does not support any (via llama-server) |
-| **Quantization**        | Supports AWQ, GPTQ, BnB, etc.                | Only supports GGUF                                                                    |
-| **Multi-GPU Inference** | Yes                                          | Yes                                                                                   |
-| **Tensor Parallelism**  | Yes                                          | No                                                                                    |
-
-In summary,
-
-- **Ollama**: Best for those who want an "it just works" experience.
-- **llama.cpp**: Best for those who want total control over their inference servers and are familiar with engine arguments.
-- **vLLM**: Best for those who want (i) to run non-GGUF quantizations of models, (ii) multi-GPU inference using tensor parallelism, or (iii) to use vision models.
-
-Using Ollama as a service offers no degradation in experience because unused models are offloaded from VRAM after some time. Using vLLM or llama.cpp as a service keeps a model in memory, so I wouldn't use this alongside Ollama in an automated, always-on fashion unless it was your primary inference engine. Essentially,
-
-| Primary Engine | Secondary Engine | Run SE as service? |
-| -------------- | ---------------- | ------------------ |
-| Ollama         | llama.cpp/vLLM   | No                 |
-| llama.cpp/vLLM | Ollama           | Yes                |
-
 
 ## Chat Platform
 
@@ -659,12 +767,12 @@ Using Ollama as a service offers no degradation in experience because unused mod
 Open WebUI is a web-based interface for managing models and chats, and provides a beautiful, performant UI for communicating with your models. You will want to do this if you want to access your models from a web interface. If you're fine with using the command line or want to consume models through a plugin/extension, you can skip this step.
 
 To install without Nvidia GPU support, run the following command:
-```
+```bash
 sudo docker run -d -p 3000:8080 --add-host=host.docker.internal:host-gateway -v open-webui:/app/backend/data --name open-webui --restart always ghcr.io/open-webui/open-webui:main
 ```
 
 For Nvidia GPUs, run the following command:
-```
+```bash
 sudo docker run -d -p 3000:8080 --gpus all --add-host=host.docker.internal:host-gateway -v open-webui:/app/backend/data --name open-webui --restart always ghcr.io/open-webui/open-webui:cuda
 ```
 
@@ -674,9 +782,6 @@ Read more about Open WebUI [here](https://github.com/open-webui/open-webui).
 
 ## Text-to-Speech Server
 
-> [!NOTE]
-> `host.docker.internal` is a magic hostname that resolves to the internal IP address assigned to the host by Docker. This allows containers to communicate with services running on the host, such as databases or web servers, without needing to know the host's IP address. It simplifies communication between containers and host-based services, making it easier to develop and deploy applications.
-
 ### Kokoro FastAPI
 
 🌟 [**GitHub**](https://github.com/remsky/Kokoro-FastAPI)
@@ -684,7 +789,7 @@ Read more about Open WebUI [here](https://github.com/open-webui/open-webui).
 Kokoro FastAPI is a text-to-speech server that wraps around and provides OpenAI-compatible API inference for [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M), a state-of-the-art TTS model. The documentation for this project is fantastic and covers most, if not all, of the use cases for the project itself.
 
 To install Kokoro-FastAPI, run
-```
+```bash
 git clone https://github.com/remsky/Kokoro-FastAPI.git
 cd Kokoro-FastAPI
 sudo docker compose up --build
