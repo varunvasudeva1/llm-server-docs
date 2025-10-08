@@ -33,16 +33,26 @@ _TL;DR_: A comprehensive guide to setting up a fully local and private language 
     - [vLLM vs. Ollama/llama.cpp](#vllm-vs-ollamallamacpp)
   - [Model Server](#model-server)
     - [llama-swap](#llama-swap)
-      - [Open WebUI Integration](#open-webui-integration-1)
     - [`systemd` Service](#systemd-service)
+    - [Open WebUI Integration](#open-webui-integration-1)
+      - [llama-swap](#llama-swap-1)
+      - [`systemd` Service](#systemd-service-1)
   - [Chat Platform](#chat-platform)
     - [Open WebUI](#open-webui)
+  - [MCP Proxy Server](#mcp-proxy-server)
+    - [mcp-proxy](#mcp-proxy)
+    - [MCPJungle](#mcpjungle)
+    - [Comparison](#comparison)
+    - [Open WebUI Integration](#open-webui-integration-2)
+      - [mcp-proxy](#mcp-proxy-1)
+      - [MCPJungle](#mcpjungle-1)
+    - [VS Code/Claude Desktop Integration](#vs-codeclaude-desktop-integration)
   - [Text-to-Speech Server](#text-to-speech-server)
     - [Kokoro FastAPI](#kokoro-fastapi)
-    - [Open WebUI Integration](#open-webui-integration-2)
+    - [Open WebUI Integration](#open-webui-integration-3)
   - [Image Generation Server](#image-generation-server)
     - [ComfyUI](#comfyui)
-      - [Open WebUI Integration](#open-webui-integration-3)
+      - [Open WebUI Integration](#open-webui-integration-4)
   - [SSH](#ssh)
   - [Firewall](#firewall)
   - [Remote Access](#remote-access)
@@ -674,14 +684,6 @@ In the installation below, we'll use `Qwen3-4B-Instruct-2507-UD-Q4_K_XL.gguf` fo
 
 This should result in a functioning llama-swap instance running at `http://localhost:9292`, which can be confirmed by running `curl http://localhost:9292/health`. It is **highly recommended** that you read the [configuration documentation](https://github.com/mostlygeek/llama-swap/wiki/Configuration). llama-swap is thoroughly documented and highly configurable - utilizing its capabilities will result in a tailored setup ready to deploy as you need it.
 
-#### Open WebUI Integration
-
-Navigate to `Admin Panel > Settings > Connections` and set the following values:
-
-- Enable OpenAI API
-- API Base URL: `http://host.docker.internal:9292/v1`
-- API Key: `anything-you-like`
-
 ### `systemd` Service
 
 The other way to persist a model across system reboots is to start the inference engine in a `.service` file that will run alongside the Linux operating system when booting, ensuring that it is available whenever the server is on. If you're willing to live with the relative compromise of not being able to swap models/backends and are satisfied with running one model, this is the lowest overhead solution and works great.
@@ -757,6 +759,26 @@ Let's call the service we're about to build `llm-server.service`. We'll assume a
     sudo systemctl status llm-server
     ```
 
+### Open WebUI Integration
+
+#### llama-swap
+
+Navigate to `Admin Panel > Settings > Connections` and set the following values:
+
+- Enable OpenAI API
+- API Base URL: `http://llama-swap:8080/v1`
+- API Key: `anything-you-like`
+
+#### `systemd` Service
+
+Follow the same steps as above.
+
+- Enable OpenAI API
+- API Base URL: `http://localhost:<port>/v1`
+- API Key: `anything-you-like`
+
+> Replace `<port>` with your desired port.
+
 ## Chat Platform
 
 ### Open WebUI
@@ -779,6 +801,288 @@ sudo docker run -d -p 3000:8080 --gpus all --add-host=host.docker.internal:host-
 You can access it by navigating to `http://localhost:3000` in your browser or `http://<server_ip>:3000` from another device on the same network. There's no need to add this to the `init.bash` script as Open WebUI will start automatically at boot via Docker Engine.
 
 Read more about Open WebUI [here](https://github.com/open-webui/open-webui).
+
+## MCP Proxy Server
+
+Model Context Protocol (MCP) is a protocol that allows LLMs to be imbued with the ability to call tools in a standardized way. Generally, models are being trained more and more with the ability to natively call tools in order to power agentic tasks - think along the lines of having a model use sequential thinking to formulate multiple thoughts, execute multiple targeted web searches, and provide a response leveraging real-time information. MCP also, probably more importantly for most people, enables models to call third-party tools like those for GitHub, Azure, etc. A complete list, curated and maintained by Anthropic, can be found [here](https://github.com/modelcontextprotocol/servers).
+
+Most guides on the internet concerning MCP will have you spin up an MCP server via a client like VS Code, Cline, etc. since most agentic uses are for coding. There are even other chat clients that support MCP server management from the UI itself (LobeChat, Cherry Studio, etc.). However, we want to be able to manage MCP servers in a central and modular way so that they aren't tied to a specific client and are available to every client you may use them with. The way we'll do this is by setting up an MCP proxy server.
+
+This proxy server will take the MCP servers running via stdio (standard IO) protocol (that can only be accessed by an application running on that device) and make them compatible with streamable HTTP. Any MCP-enabled client can use streamable HTTP so they'll also be able to use all the servers we install on our physical server. This centralizes the management of your MCP servers: create/edit/delete servers in one place, use any of them from your various clients (Open WebUI, VS Code, etc.).
+
+We'll use the [fetch](https://github.com/zcaceres/fetch-mcp), [sequential-thinking](https://github.com/arben-adm/mcp-sequential-thinking), and [searxng](https://github.com/ihor-sokoliuk/MCP-searxng) MCP servers to get started. The process for adding more servers will be identical to the setup steps and is, therefore, left to you.
+
+### mcp-proxy
+
+🌟 [**GitHub**](https://github.com/sparfenyuk/mcp-proxy)  
+
+mcp-proxy is a server proxy that allows switching between transports (stdio to streamable HTTP and vice versa). I'll be using port 3131 to avoid conflicts - feel free to change this as you need to. I will also be extending mcp-proxy to include `uv`: most MCP servers use either `npx` or `uv` and setting mcp-proxy up without `uv` is going to hamper your ability to run the MCP servers you'd like. If you don't require `uv`, (i) don't add the `build` section in the compose file and (ii) skip step 4.
+
+1. Create a compose file
+    ```bash
+    mkdir mcp-proxy
+    cd mcp-proxy
+    sudo nano docker-compose.yaml
+    ```
+
+2. Enter the following:
+    ```yaml
+    services:
+    mcp-proxy:
+        container_name: mcp-proxy
+        build:
+            context: .
+            dockerfile: Dockerfile
+        networks:
+        - app-net
+        volumes:
+        - .:/config
+        - /:/<your_server_hostname>:ro
+        restart: unless-stopped
+        ports:
+        - 3131:3131
+        command: "--pass-environment --port=3131 --host 0.0.0.0 --transport streamablehttp --named-server-config /config/servers.json"
+
+    networks:
+    app-net:
+        external: true
+    ```
+
+    > Replace `<your_server_hostname>`.
+
+3. Create a `servers.json` file:
+    ```json
+    {
+        "mcpServers": {
+            "fetch": {
+                "disabled": false,
+                "timeout": 60,
+                "command": "uvx",
+                "args": [
+                    "mcp-server-fetch"
+                ],
+                "transportType": "stdio"
+            },
+            "sequential-thinking": {
+                "command": "npx",
+                "args": [
+                    "-y",
+                    "@modelcontextprotocol/server-sequential-thinking"
+                ]
+            },
+            "searxng": {
+                "command": "npx",
+                "args": ["-y", "mcp-searxng"],
+                "env": {
+                    "SEARXNG_URL": "http://searxng:8080/search?q=<query>"
+                }
+            }
+        }
+    }
+    ```
+
+4. Create a `Dockerfile`:
+    ```bash
+    sudo nano Dockerfile
+    ```
+    and enter the following:
+    ```Dockerfile
+    FROM ghcr.io/sparfenyuk/mcp-proxy:latest
+
+    # Install dependencies for nvm and Node.js
+    RUN apk add --update npm
+
+    # Install the 'uv' package
+    RUN python3 -m ensurepip && pip install --no-cache-dir uv
+
+    ENV PATH="/usr/local/bin:/usr/bin:$PATH" \
+        UV_PYTHON_PREFERENCE=only-system
+
+    ENTRYPOINT ["catatonit", "--", "mcp-proxy"]
+    ```
+
+5. Start the container with `sudo docker compose up -d`
+
+Your mcp-proxy container should be up and running! Adding servers is simple: add the relevant server to `servers.json` (you can use the same configuration that the MCP server's developer provides for VS Code, it's identical) and then restart the container with `sudo docker restart mcp-proxy`.
+
+### MCPJungle
+
+🌟 [**GitHub**](https://github.com/mcpjungle/MCPJungle?tab=readme-ov-file)  
+
+MCPJungle is another MCP proxy server with a different focus. It focuses on providing more of a "production-grade" experience, a lot of which is disabled by default in the development mode of the application. We'll use the standard development version of the container here on port 4141.
+
+1. Create a compose file:
+    ```bash
+    mkdir mcpjungle
+    cd mcpjungle
+    sudo nano docker-compose.yaml
+    ```
+
+   Enter the following and save:
+
+    ```yaml
+    # MCPJungle Docker Compose configuration for individual users.
+    # Use this compose file if you want to run MCPJungle locally for your personal MCP management & Gateway.
+    # The mcpjungle server runs in development mode.
+    services:
+    db:
+        image: postgres:latest
+        container_name: mcpjungle-db
+        environment:
+            POSTGRES_USER: mcpjungle
+            POSTGRES_PASSWORD: mcpjungle
+            POSTGRES_DB: mcpjungle
+        ports:
+        - "5432:5432"
+        networks:
+        - app-net
+        volumes:
+        - db_data:/var/lib/postgresql/data
+        healthcheck:
+            test: ["CMD-SHELL", "PGPASSWORD=mcpjungle pg_isready -U mcpjungle"]
+            interval: 10s
+            timeout: 5s
+            retries: 5
+        restart: unless-stopped
+
+    mcpjungle:
+        image: mcpjungle/mcpjungle:${MCPJUNGLE_IMAGE_TAG:-latest-stdio}
+        container_name: mcpjungle-server
+        environment:
+            DATABASE_URL: postgres://mcpjungle:mcpjungle@db:5432/mcpjungle
+            SERVER_MODE: ${SERVER_MODE:-development}
+            OTEL_ENABLED: ${OTEL_ENABLED:-false}
+        ports:
+        - "4141:8080"
+        networks:
+        - app-net
+        volumes:
+        # Mount host filesystem current directory to enable filesystem MCP server access
+        - .:/host/project:ro
+        - /home/<your_username>:/host:ro
+        # Other options:
+        # - ${HOME}:/host/home:ro
+        # - /tmp:/host/tmp:rw
+        depends_on:
+        db:
+            condition: service_healthy
+        restart: always
+
+    volumes:
+        db_data:
+
+    networks:
+    app-net:
+        external: true
+    ```
+
+2. Start the container with `sudo docker compose up -d`
+
+3. Create a tool file:
+    ```bash
+    sudo nano fetch.json
+    ```
+
+    Enter the following and save:
+    ```json
+    {
+        "name": "fetch",
+        "transport": "stdio",
+        "command": "npx",
+        "args": ["mcp-server-fetch"]
+    }
+    ```
+
+4. Register the tool:
+    ```bash
+    sudo docker exec -i mcpjungle-server /mcpjungle register -c /host/project/fetch.json
+    ```
+
+Repeat steps 3 and 4 for every tool mentioned. Commands for `sequential-thinking` and `searxng` can be found below.
+
+**sequential-thinking**
+```json
+{
+    "name": "sequential-thinking",
+    "transport": "stdio",
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"]
+}
+```
+
+**searxng**
+```json
+{
+    "name": "searxng",
+    "transport": "stdio",
+    "command": "npx",
+    "args": ["-y", "mcp-searxng"],
+    "env": {
+        "SEARXNG_URL": "http://searxng:8080/search?q=<query>"
+    }
+}
+```
+
+### Comparison
+
+The choice between the two services is yours entirely: I use mcp-proxy because I find the workflow slightly less cumbersome than MCPJungle. Here's a comparison with the stengths of each service.
+
+**mcp-proxy > MCPJungle**
+
+- Servers can just be added to `servers.json` and will be registered automatically on container restart - MCPJungle requires manual registration of tools via the CLI
+- Uses the standard MCP syntax that most clients accept for configuration
+- Lighter footprint in that it doesn't need to spin up a separate database container
+- Uses stateful connections - MCPJungle spins up a new connection per tool call, which can lead to some performance overhead
+
+**MCPJungle > mcp-proxy**
+
+- Combines all tools under one endpoint, making it very easy to integrate into a chat frontend
+- Capable of creating a very configurable setup with tool groups, access control, selective tool enabling/disabling
+- Supports enterprise features like telemetry
+
+### Open WebUI Integration
+
+Open WebUI recently added support for streamable HTTP - where once you may have had to use [mcpo](https://github.com/open-webui/mcpo), Open WebUI's way of automatically generating an OpenAPI-compatible HTTP server, you can use the MCP servers you've set up as-is with no changes.
+
+#### mcp-proxy
+
+Navigate to `Admin Panel > Settings > External Tools`. Click the `+` button to add a new tool and enter the following information:
+
+- URL: `http://mcp-proxy:<port>/servers/<tool_name>/mcp`
+- API Key: `anything-you-like`
+- ID: `<tool_name>`
+- Name: `<tool_name>`
+
+> Replace `<port>` with the port of the MCP service and `<tool_name>` with the specific tool you're adding.
+
+#### MCPJungle
+
+Follow the same steps as above. By design, MCPJungle exposes all tools via one endpoint, so you should only have to add once:
+
+- URL: `http://mcpjungle-server:8080/mcp`
+- API Key: `anything-you-like`
+- ID: `<tool_name>`
+- Name: `<tool_name>`
+
+
+### VS Code/Claude Desktop Integration
+
+The steps for integrating your MCP proxy server in another client such as VS Code (Claude Desktop, Zed, etc.) will be similar, if not exactly the same.
+
+Add the following key and value to your `mcp.json` file:
+
+```json
+"your-mcp-proxy-name": {
+    "timeout": 60,
+    "type": "stdio",
+    "command": "npx",
+    "args": [
+    "mcp-remote",
+    "http://<your-server-url>/mcp",
+    "--allow-http"
+    ]
+}
+```
 
 ## Text-to-Speech Server
 
