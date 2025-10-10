@@ -1,6 +1,6 @@
 # Local LLaMA Server Setup Documentation
 
-_TL;DR_: End-to-end documentation to set up your own local & fully private LLM server on Debian. Equipped with chat, web search, RAG, model management, MCP, image generation, and TTS, along with steps for configuring SSH, firewall, and secure remote access via Tailscale.
+_TL;DR_: End-to-end documentation to set up your own local & fully private LLM server on Debian. Equipped with chat, web search, RAG, model management, MCP servers, image generation, and TTS, along with steps for configuring SSH, firewall, and secure remote access via Tailscale.
 
 Software Stack:
 
@@ -64,7 +64,7 @@ Software Stack:
     - [Open WebUI Integration](#open-webui-integration-4)
   - [Image Generation Server](#image-generation-server)
     - [ComfyUI](#comfyui)
-      - [Open WebUI Integration](#open-webui-integration-5)
+    - [Open WebUI Integration](#open-webui-integration-5)
   - [SSH](#ssh)
   - [Firewall](#firewall)
   - [Remote Access](#remote-access)
@@ -73,26 +73,23 @@ Software Stack:
       - [Exit Nodes](#exit-nodes)
       - [Local DNS](#local-dns)
       - [Third-Party VPN Integration](#third-party-vpn-integration)
-  - [Verifying](#verifying)
-    - [Inference Engine](#inference-engine-1)
-    - [Open WebUI](#open-webui-1)
-    - [Text-to-Speech Server](#text-to-speech-server-1)
-    - [ComfyUI](#comfyui-1)
   - [Updating](#updating)
     - [General](#general-1)
     - [Nvidia Drivers \& CUDA](#nvidia-drivers--cuda)
     - [Ollama](#ollama-1)
     - [llama.cpp](#llamacpp-1)
     - [vLLM](#vllm-1)
-    - [Open WebUI](#open-webui-2)
+    - [llama-swap](#llama-swap-2)
+    - [Open WebUI](#open-webui-1)
+    - [mcp-proxy/MCPJungle](#mcp-proxymcpjungle)
     - [Kokoro FastAPI](#kokoro-fastapi-1)
-    - [ComfyUI](#comfyui-2)
+    - [ComfyUI](#comfyui-1)
   - [Troubleshooting](#troubleshooting)
     - [`ssh`](#ssh-1)
     - [Nvidia Drivers](#nvidia-drivers)
     - [Ollama](#ollama-2)
     - [vLLM](#vllm-2)
-    - [Open WebUI](#open-webui-3)
+    - [Open WebUI](#open-webui-2)
   - [Monitoring](#monitoring)
   - [Notes](#notes)
     - [Software](#software)
@@ -1285,7 +1282,7 @@ Now, we have to download and load a model. Here, we'll use FLUX.1 [dev], a new, 
 
     Otherwise, to run it just once, simply execute the above lines in a terminal window.
 
-#### Open WebUI Integration
+### Open WebUI Integration
 
 Navigate to `Admin Panel > Settings > Images` and set the following values:
 
@@ -1360,7 +1357,7 @@ Setting up a firewall is essential for securing your server. The Uncomplicated F
 
 - Check the status of UFW:
     ```bash
-    sudo ufw status
+    sudo ufw status verbose
     ```
 
 > [!WARNING]
@@ -1417,45 +1414,6 @@ To use a Mullvad exit on one of your devices, first find the exit node you want 
 > [!WARNING]
 > Ensure the device is allowed to use the Mullvad add-on through the Admin Console first.
 
-## Verifying
-
-This section isn't strictly necessary by any means - if you use all the elements in the guide, a good experience in Open WebUI means you've succeeded with the goal of the guide. However, it can be helpful to test the disparate installations at different stages in this process.
-
-### Inference Engine
-
-To test your OpenAI-compatible server endpoint, run:
-```
-curl http://localhost:<port>/v1/completions -d '{
-  "model": "llama2",
-  "prompt":"Why is the sky blue?"
-}'
-```
-> Replace `<port>` with the actual port of your server and `llama2` with your preferred model. If your physical server is different than the machine you're executing the above command on, replace `localhost` with the IP of the physical server.
-
-### Open WebUI
-
-Visit `http://localhost:3000`. If you're greeted by the authentication page, you've successfully installed Open WebUI.
-
-### Text-to-Speech Server
-
-To test your TTS server, run the following command:
-```
-curl -s http://localhost:<port>/v1/audio/speech -H "Content-Type: application/json" -d '{
-    "input": "The quick brown fox jumped over the lazy dog."}' > speech.mp3
-```
-
-If you see the `speech.mp3` file in the directory you ran the command from, you should be good to go. If you're paranoid, test it using a player like `aplay`. Run the following commands:
-```
-sudo apt install aplay
-aplay speech.mp3
-```
-
-Kokoro FastAPI: To test the web UI, visit `http://localhost:7860`.
-
-### ComfyUI
-
-Visit `http://localhost:8188`. If you're greeted by the workflow page, you've successfully installed ComfyUI.
-
 ## Updating
 
 Updating your system is a good idea to keep software running optimally and with the latest security patches. Updates to Ollama allow for inference from new model architectures and updates to Open WebUI enable new features like voice calling, function calling, pipelines, and more.
@@ -1505,6 +1463,16 @@ pip install vllm --upgrade
 
 For a Docker installation, you're good to go when you re-run your Docker command, because it pulls the latest Docker image for vLLM.
 
+### llama-swap
+
+Delete the current container:
+```bash
+sudo docker stop llama-swap
+sudo docker rm llama-swap
+```
+
+Re-run the container command from the [llama-swap section](#llama-swap).
+
 ### Open WebUI
 
 To update Open WebUI once, run the following command:
@@ -1517,9 +1485,19 @@ To keep it updated automatically, run the following command:
 docker run -d --name watchtower --volume /var/run/docker.sock:/var/run/docker.sock containrrr/watchtower open-webui
 ```
 
+### mcp-proxy/MCPJungle
+
+Navigate to the directory and pull the latest container image:
+```bash
+cd mcp-proxy # or mcpjungle
+sudo docker compose down
+sudo docker compose pull
+sudo docker compose up -d
+```
+
 ### Kokoro FastAPI
 
-Navigate to the directory and pull the latest image from Docker:
+Navigate to the directory and pull the latest container image:
 ```
 cd Kokoro-FastAPI
 sudo docker compose pull
