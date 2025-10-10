@@ -1177,6 +1177,8 @@ Follow the same steps as above. By design, MCPJungle exposes all tools via one e
 - ID: `<tool_name>`
 - Name: `<tool_name>`
 
+> [!IMPORTANT]
+> When configuring models in Open WebUI (via `Admin Panel > Settings > Models > my-cool-model > Advanced Params`), change the `Function Calling` parameter from `Default` to `Native`. This step will allow the model to use multiple tool calls to formulate a single response instead of just one.
 
 ### VS Code/Claude Desktop Integration
 
