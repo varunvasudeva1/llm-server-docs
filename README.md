@@ -27,6 +27,7 @@ Software Stack:
     - [Configure Auto-Login (optional)](#configure-auto-login-optional)
   - [Docker](#docker)
     - [Nvidia Container Toolkit](#nvidia-container-toolkit)
+    - [Create a Network](#create-a-network)
     - [Helpful Commands](#helpful-commands)
   - [HuggingFace CLI](#huggingface-cli)
     - [Manage Models](#manage-models)
@@ -336,6 +337,56 @@ You will most likely want to use GPUs via Docker - this will require Nvidia Cont
         libnvidia-container-tools=${NVIDIA_CONTAINER_TOOLKIT_VERSION} \
         libnvidia-container1=${NVIDIA_CONTAINER_TOOLKIT_VERSION}
     ```
+
+### Create a Network
+
+We'll be running most services via Docker containers. To allow multiple containers to communicate with each other, we can open up ports via UFW (which we'll [configure later](#firewall)) but this is less optimal than creating a Docker network. This way, all containers on the network can securely talk to each other without needing to open ports for the many services we could run via UFW, inherently creating a more secure setup.
+
+We'll call this network `app-net`: you can call it anything you like, just be sure to update the commands that use it later.
+
+Run the following:
+
+```bash
+sudo docker network create app-net
+```
+
+That's it! Now, when we create containers, we can reference it as follows:
+
+**Docker Run**
+```bash
+sudo docker run <container> --network app-net
+```
+
+**Docker Compose**
+```yaml
+services:
+    <container>:
+        # add this
+        networks:
+        - app-net
+
+# add this
+networks:
+    app-net:
+        external: true
+```
+
+> Replace `<container>` with the actual service - don't forget to add other parameters too.
+
+With this configured, we can now call containers by name and port. Let's pretend we're calling the /health endpoint in `llama-swap` from `open-webui` (two actual containers we'll be creating later on) to ensure that the containers can see and speak to each other. Run (`CTRL+C` to quit):
+
+```bash
+sudo docker exec -i open-webui curl http://llama-swap:8080/health
+```
+
+You could also run it the other way to be extra sure:
+
+```bash
+sudo docker exec -it llama-swap curl http://open-webui:8080
+```
+
+> [!IMPORTANT]
+> The port is always the **internal port** the container is running on. If a container runs on 1111:8080, for example, 1111 is the port on the host (where you might access it, like `http://localhost:1111` or `http://<server_ip>:1111`) and 8080 is the internal port the container is running on. Thus, trying to access the container on 1111 via `app-net` will not work. Remembering this when specifying URLs in services will save you a lot of unnecessary "why isn't this working?" pains.
 
 ### Helpful Commands
 
@@ -855,12 +906,12 @@ Open WebUI is a web-based interface for managing models and chats, and provides 
 
 To install without Nvidia GPU support, run the following command:
 ```bash
-sudo docker run -d -p 3000:8080 --add-host=host.docker.internal:host-gateway -v open-webui:/app/backend/data --name open-webui --restart always ghcr.io/open-webui/open-webui:main
+sudo docker run -d -p 3000:8080 --network app-net --add-host=host.docker.internal:host-gateway -v open-webui:/app/backend/data --name open-webui --restart always ghcr.io/open-webui/open-webui:main
 ```
 
 For Nvidia GPUs, run the following command:
 ```bash
-sudo docker run -d -p 3000:8080 --gpus all --add-host=host.docker.internal:host-gateway -v open-webui:/app/backend/data --name open-webui --restart always ghcr.io/open-webui/open-webui:cuda
+sudo docker run -d -p 3000:8080 --network app-net --gpus all --add-host=host.docker.internal:host-gateway -v open-webui:/app/backend/data --name open-webui --restart always ghcr.io/open-webui/open-webui:cuda
 ```
 
 You can access it by navigating to `http://localhost:3000` in your browser or `http://<server_ip>:3000` from another device on the same network. There's no need to add this to the `init.bash` script as Open WebUI will start automatically at boot via Docker Engine.
@@ -1284,15 +1335,29 @@ Setting up a firewall is essential for securing your server. The Uncomplicated F
     ```bash
     sudo apt install ufw
     ```
-- Allow SSH, HTTPS, and any other ports you need:
+
+- Allow SSH, HTTPS, and HTTP to your local network:
     ```bash
-    sudo ufw allow ssh https 80 8080 # [your other services' ports]
+    # Allow all <ip_range> hosts access to port <port>
+    sudo ufw allow from <ip_range> to any port <port> proto tcp
     ```
-    Here, we're allowing SSH (port 22), HTTPS (port 443), HTTP (port 80), Docker (port 8080) to start. You can add or remove ports as needed. Ensure to add ports for services that you end up using - both from this guide and in general.
+    
+    Start with running the above command to open ports 22 (SSH), 80 (HTTP), and 443 (HTTPS) to our local network. Since we use the `app-net` Docker network for our containers, there's no need to open anything else up. Open ports up carefully, ideally only to specific IPs or to your local network. To allow a port for a specific IP, you can replace the IP range with a single IP and it'll work exactly the same way.
+
+> [!TIP]
+> You can find your local network's IP address range by running `ip route show`. The result will be something like this:
+> ```
+> me@my-cool-server:~$ ip route show
+> default via <router_ip> dev enp3s0 proto dhcp src <server_ip> metric 100
+> <network_ip_range> dev enp3s0 proto kernel scope link src <server_ip> metric 100
+> # more routes
+> ```
+
 - Enable UFW:
     ```bash
     sudo ufw enable
     ```
+
 - Check the status of UFW:
     ```bash
     sudo ufw status
