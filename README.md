@@ -1,10 +1,18 @@
 # Local LLaMA Server Setup Documentation
 
-_TL;DR_: A comprehensive guide to setting up a fully local and private language model server equipped with the following:
+_TL;DR_: End-to-end documentation to set up your own local & fully private LLM server on Debian. Equipped with chat, web search, RAG, model management, MCP servers, image generation, and TTS, along with steps for configuring SSH, firewall, and secure remote access via Tailscale.
+
+Software Stack:
+
 - Inference Engine ([Ollama](https://github.com/ollama/ollama), [llama.cpp](https://github.com/ggml-org/llama.cpp), [vLLM](https://github.com/vllm-project/vllm))
+- Search Engine ([SearXNG](https://github.com/searxng/searxng))
+- Model Server ([llama-swap](https://github.com/mostlygeek/llama-swap), `systemd` service)
 - Chat Platform ([Open WebUI](https://github.com/open-webui/open-webui))
+- MCP Proxy Server ([mcp-proxy](https://github.com/sparfenyuk/mcp-proxy), [MCPJungle](https://github.com/mcpjungle/MCPJungle))
 - Text-to-Speech Server ([Kokoro FastAPI](https://github.com/remsky/Kokoro-FastAPI))
 - Image Generation Server ([ComfyUI](https://github.com/comfyanonymous/ComfyUI))
+
+![Software Stack Architectural Diagram](llm-server-architecture.png)
 
 ## Table of Contents
 
@@ -19,27 +27,44 @@ _TL;DR_: A comprehensive guide to setting up a fully local and private language 
     - [Configure Auto-Login (optional)](#configure-auto-login-optional)
   - [Docker](#docker)
     - [Nvidia Container Toolkit](#nvidia-container-toolkit)
+    - [Create a Network](#create-a-network)
     - [Helpful Commands](#helpful-commands)
   - [HuggingFace CLI](#huggingface-cli)
     - [Manage Models](#manage-models)
     - [Download Models](#download-models)
     - [Delete Models](#delete-models)
+  - [Search Engine](#search-engine)
+    - [SearXNG](#searxng)
+    - [Open WebUI Integration](#open-webui-integration)
   - [Inference Engine](#inference-engine)
     - [Ollama](#ollama)
     - [llama.cpp](#llamacpp)
     - [vLLM](#vllm)
-    - [Creating a Service](#creating-a-service)
-    - [Open WebUI Integration](#open-webui-integration)
+    - [Open WebUI Integration](#open-webui-integration-1)
     - [Ollama vs. llama.cpp](#ollama-vs-llamacpp)
     - [vLLM vs. Ollama/llama.cpp](#vllm-vs-ollamallamacpp)
+  - [Model Server](#model-server)
+    - [llama-swap](#llama-swap)
+    - [`systemd` Service](#systemd-service)
+    - [Open WebUI Integration](#open-webui-integration-2)
+      - [llama-swap](#llama-swap-1)
+      - [`systemd` Service](#systemd-service-1)
   - [Chat Platform](#chat-platform)
     - [Open WebUI](#open-webui)
+  - [MCP Proxy Server](#mcp-proxy-server)
+    - [mcp-proxy](#mcp-proxy)
+    - [MCPJungle](#mcpjungle)
+    - [Comparison](#comparison)
+    - [Open WebUI Integration](#open-webui-integration-3)
+      - [mcp-proxy](#mcp-proxy-1)
+      - [MCPJungle](#mcpjungle-1)
+    - [VS Code/Claude Desktop Integration](#vs-codeclaude-desktop-integration)
   - [Text-to-Speech Server](#text-to-speech-server)
     - [Kokoro FastAPI](#kokoro-fastapi)
-    - [Open WebUI Integration](#open-webui-integration-1)
+    - [Open WebUI Integration](#open-webui-integration-4)
   - [Image Generation Server](#image-generation-server)
     - [ComfyUI](#comfyui)
-      - [Open WebUI Integration](#open-webui-integration-2)
+    - [Open WebUI Integration](#open-webui-integration-5)
   - [SSH](#ssh)
   - [Firewall](#firewall)
   - [Remote Access](#remote-access)
@@ -48,26 +73,23 @@ _TL;DR_: A comprehensive guide to setting up a fully local and private language 
       - [Exit Nodes](#exit-nodes)
       - [Local DNS](#local-dns)
       - [Third-Party VPN Integration](#third-party-vpn-integration)
-  - [Verifying](#verifying)
-    - [Inference Engine](#inference-engine-1)
-    - [Open WebUI](#open-webui-1)
-    - [Text-to-Speech Server](#text-to-speech-server-1)
-    - [ComfyUI](#comfyui-1)
   - [Updating](#updating)
     - [General](#general-1)
     - [Nvidia Drivers \& CUDA](#nvidia-drivers--cuda)
     - [Ollama](#ollama-1)
     - [llama.cpp](#llamacpp-1)
     - [vLLM](#vllm-1)
-    - [Open WebUI](#open-webui-2)
+    - [llama-swap](#llama-swap-2)
+    - [Open WebUI](#open-webui-1)
+    - [mcp-proxy/MCPJungle](#mcp-proxymcpjungle)
     - [Kokoro FastAPI](#kokoro-fastapi-1)
-    - [ComfyUI](#comfyui-2)
+    - [ComfyUI](#comfyui-1)
   - [Troubleshooting](#troubleshooting)
     - [`ssh`](#ssh-1)
     - [Nvidia Drivers](#nvidia-drivers)
     - [Ollama](#ollama-2)
     - [vLLM](#vllm-2)
-    - [Open WebUI](#open-webui-3)
+    - [Open WebUI](#open-webui-2)
   - [Monitoring](#monitoring)
   - [Notes](#notes)
     - [Software](#software)
@@ -86,9 +108,9 @@ The process involves installing the requisite drivers, setting the GPU power lim
 
 ## Priorities
 
-- **Simplicity of setup process**: It should be relatively straightforward to set up the components of the solution.
-- **Stability of runtime**: The components should be stable and capable of running for weeks at a time without any intervention necessary.
-- **Ease of maintenance**: The components and their interactions should be uncomplicated enough that you know enough to maintain them as they evolve (because they *will* evolve).
+- **Simplicity**: It should be relatively straightforward to set up the components of the solution.
+- **Stability**: The components should be stable and capable of running for weeks at a time without any intervention necessary.
+- **Maintainability**: The components and their interactions should be uncomplicated enough that you know enough to maintain them as they evolve (because they *will* evolve).
 - **Aesthetics**: The result should be as close to a cloud provider's chat platform as possible. A homelab solution doesn't necessarily need to feel like it was cobbled together haphazardly.
 - **Modularity**: Components in the setup should be able to be swapped out for newer/more performant/better maintained alternatives easily. Standard protocols (OpenAI-compatibility, MCPs, etc.) help with this a lot and, in this guide, they are always preferred over bundled solutions.
 - **Open source**: The code should be able to be verified by a community of engineers. Chat platforms and LLMs involve large amounts of personal data conveyed in natural language and it's important to know that data isn't going outside your machine.
@@ -313,6 +335,56 @@ You will most likely want to use GPUs via Docker - this will require Nvidia Cont
         libnvidia-container1=${NVIDIA_CONTAINER_TOOLKIT_VERSION}
     ```
 
+### Create a Network
+
+We'll be running most services via Docker containers. To allow multiple containers to communicate with each other, we can open up ports via UFW (which we'll [configure later](#firewall)) but this is less optimal than creating a Docker network. This way, all containers on the network can securely talk to each other without needing to open ports for the many services we could run via UFW, inherently creating a more secure setup.
+
+We'll call this network `app-net`: you can call it anything you like, just be sure to update the commands that use it later.
+
+Run the following:
+
+```bash
+sudo docker network create app-net
+```
+
+That's it! Now, when we create containers, we can reference it as follows:
+
+**Docker Run**
+```bash
+sudo docker run <container> --network app-net
+```
+
+**Docker Compose**
+```yaml
+services:
+    <container>:
+        # add this
+        networks:
+        - app-net
+
+# add this
+networks:
+    app-net:
+        external: true
+```
+
+> Replace `<container>` with the actual service - don't forget to add other parameters too.
+
+With this configured, we can now call containers by name and port. Let's pretend we're calling the /health endpoint in `llama-swap` from `open-webui` (two actual containers we'll be creating later on) to ensure that the containers can see and speak to each other. Run (`CTRL+C` to quit):
+
+```bash
+sudo docker exec -i open-webui curl http://llama-swap:8080/health
+```
+
+You could also run it the other way to be extra sure:
+
+```bash
+sudo docker exec -it llama-swap curl http://open-webui:8080
+```
+
+> [!IMPORTANT]
+> The port is always the **internal port** the container is running on. If a container runs on 1111:8080, for example, 1111 is the port on the host (where you might access it, like `http://localhost:1111` or `http://<server_ip>:1111`) and 8080 is the internal port the container is running on. Thus, trying to access the container on 1111 via `app-net` will not work. Remembering this when specifying URLs in services will save you a lot of unnecessary "why isn't this working?" pains.
+
 ### Helpful Commands
 
 In the process of setting up this server (or anywhere down the rabbit hole of setting up services), you're likely to use Docker often. For the uninititated, here are helpful commands that will make navigating and troubleshooting containers easier:
@@ -388,6 +460,60 @@ hf delete-cache
 ```
 
 This will start an interactive session where you can remove models from the HuggingFace directory. In case you've been saving models in a different location than `.cache/huggingface`, deleting models from there will free up space but the metadata will remain in the HF cache until it is deleted properly. This can be done via the above command but you can also simply delete the model directory from `.cache/huggingface/hub`.
+
+## Search Engine
+
+> [!NOTE]
+> This step is optional but highly recommended for grounding LLMs with relevant search results from reputable sources. Targeted web searches via MCP tool calls make reports generated by LLMs much less prone to random hallucinations.
+
+### SearXNG
+
+🌟 [**GitHub**](https://github.com/searxng/searxng)  
+📖 [**Documentation**](https://docs.searxng.org)  
+
+To power our search-based workflows, we don't want to rely on a search provider that can monitor searches. While using any search engine has this problem, metasearch engines like SearXNG mitigate it to a decent degree. SearXNG aggregates results from over 245 [search services](https://docs.searxng.org/user/configured_engines.html#configured-engines) and does not track/profile users. You can use a hosted instance on the Internet but, considering the priorities of this guide and how trivial it is to set one up, we'll be spinning up our own instance on port 5050.
+
+1. Start the container:
+    ```bash
+    mkdir searxng
+    cd searxng
+    sudo docker pull searxng/searxng
+    export PORT=5050
+    sudo docker run \
+        -d -p ${PORT}:8080 \
+        --name searxng \
+        --network app-net \
+        -v "${PWD}/searxng:/etc/searxng" \
+        -e "BASE_URL=http://0.0.0.0:$PORT/" \
+        -e "INSTANCE_NAME=searxng" \
+        --restart unless-stopped \
+        searxng/searxng
+    ```
+
+2. Edit `settings.yml` to include JSON format support:
+    ```bash
+    sudo nano settings.yml
+    ```
+
+    Add the following:
+    ```yaml
+      search:
+        # ...other parameters here...
+        formats:
+            - html
+            - json      # add this line
+    ```
+
+3. Restart the container with `sudo docker restart searxng`
+
+### Open WebUI Integration
+
+In case you want a simple web search workflow and want to skip MCP servers/agentic setups, Open WebUI supports web search functionality natively. Navigate to `Admin Panel > Settings > Web Search` and set the following values:
+
+- Enable `Web Search`
+- Web Search Engine: `searxng`
+- Searxng Query URL: `http://searxng:8080/search?q=<query>`
+- API Key: `anything-you-like`
 
 ## Inference Engine
 
@@ -526,11 +652,154 @@ To serve a different model:
     --model <model>
     ```
 
-### Creating a Service
+### Open WebUI Integration
 > [!NOTE]
-> Only needed for manual installations of llama.cpp/vLLM.
+> Only needed for llama.cpp/vLLM.
 
-While the above steps will help you get up and running with an OpenAI-compatible LLM server, they will not help with this server persisting after you close your terminal window or restart your physical server. Docker can achieve this with the `-d` (for "detach") flag but running vanilla Python servers is common. To do this, we must start the inference engine in a `.service` file that will run alongside the Linux operating system when booting, ensuring that it is available whenever the server is on.
+Navigate to `Admin Panel > Settings > Connections` and set the following values:
+
+- Enable `OpenAI API`
+- API Base URL: `http://host.docker.internal:<port>/v1`
+- API Key: `anything-you-like`
+
+> [!NOTE]
+> `host.docker.internal` is a magic hostname that resolves to the internal IP address assigned to the host by Docker. This allows containers to communicate with services running on the host, such as databases or web servers, without needing to know the host's IP address. It simplifies communication between containers and host-based services, making it easier to develop and deploy applications.
+
+### Ollama vs. llama.cpp
+
+| **Aspect**                 | **Ollama (Wrapper)**                                          | **llama.cpp (Vanilla)**                                                                   |
+| -------------------------- | ------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| **Installation/Setup**     | One-click install & CLI model management                      | Requires manual setup/configuration                                                       |
+| **Open WebUI Integration** | First-class citizen                                           | Requires OpenAI-compatible endpoint setup                                                 |
+| **Model Switching**        | Native model-switching via server                             | Requires manual port management or [llama-swap](https://github.com/mostlygeek/llama-swap) |
+| **Customizability**        | Limited: Modelfiles are cumbersome                            | Full control over parameters via CLI                                                      |
+| **Transparency**           | Defaults may override model parameters (e.g., context length) | Full transparency in parameter settings                                                   |
+| **GGUF Support**           | Inherits llama.cpp's best-in-class implementation             | Best GGUF implementation                                                                  |
+| **GPU-CPU Splitting**      | Inherits llama.cpp's efficient splitting                      | Trivial GPU-CPU splitting out-of-the-box                                                  |
+
+---
+
+### vLLM vs. Ollama/llama.cpp
+| **Feature**             | **vLLM**                                     | **Ollama/llama.cpp**                                                                  |
+| ----------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------- |
+| **Vision Models**       | Supports Qwen 2.5 VL, Llama 3.2 Vision, etc. | Ollama supports some vision models, llama.cpp does not support any (via llama-server) |
+| **Quantization**        | Supports AWQ, GPTQ, BnB, etc.                | Only supports GGUF                                                                    |
+| **Multi-GPU Inference** | Yes                                          | Yes                                                                                   |
+| **Tensor Parallelism**  | Yes                                          | No                                                                                    |
+
+In summary,
+
+- **Ollama**: Best for those who want an "it just works" experience.
+- **llama.cpp**: Best for those who want total control over their inference servers and are familiar with engine arguments.
+- **vLLM**: Best for those who want (i) to run non-GGUF quantizations of models, (ii) multi-GPU inference using tensor parallelism, or (iii) to use vision models.
+
+Using Ollama as a service offers no degradation in experience because unused models are offloaded from VRAM after some time. Using vLLM or llama.cpp as a service keeps a model in memory, so I wouldn't use this alongside Ollama in an automated, always-on fashion unless it was your primary inference engine. Essentially,
+
+| Primary Engine | Secondary Engine | Run SE as service? |
+| -------------- | ---------------- | ------------------ |
+| Ollama         | llama.cpp/vLLM   | No                 |
+| llama.cpp/vLLM | Ollama           | Yes                |
+
+## Model Server
+
+> [!NOTE]
+> Only needed for manual installations of llama.cpp/vLLM. Ollama manages model management via its CLI.
+
+While the above steps will help you get up and running with an OpenAI-compatible LLM server, they will not help with this server persisting after you close your terminal window or restart your physical server. They also won't allow a chat platform to reliably reference and swap between the various models you have available - a likely use-case in a landscape where different models specialize in different tasks. Running the inference engine via Docker can achieve this persistence with the `-d` (for "detach") flag but (i) services like llama.cpp and vLLM are usually configured without Docker and (ii) it can't swap models on-demand. This necessitates a server that can manage loading/unloading, swapping, and listing available models.
+
+### llama-swap
+
+🌟 [**GitHub**](https://github.com/mostlygeek/llama-swap)  
+📖 [**Documentation**](https://github.com/mostlygeek/llama-swap/wiki)
+
+> [!TIP]
+> This is my recommended way to run llama.cpp/vLLM models.
+
+llama-swap is a lightweight proxy server for LLMs that solves our pain points from above. It's an extremely configurable tool that allows a single point of entry for models from various backends. Models can be set up in groups, listed/unlisted easily, configured with customized hyperparameters, and monitored using streamed logs in the llama-swap web UI.
+
+In the installation below, we'll use `Qwen3-4B-Instruct-2507-UD-Q4_K_XL.gguf` for llama.cpp and `Qwen/Qwen3-4B-Instruct-2507` for vLLM. We'll also use port 7000 to serve the models on.
+
+1. Create a new directory with the `config.yaml` file:
+    ```bash
+    sudo mkdir llama-swap
+    cd llama-swap
+    sudo nano config.yaml
+    ```
+
+2. Enter the following and save:
+
+    **llama.cpp**
+    ```yaml
+    models:
+        "qwen3-4b":
+            proxy: "http://127.0.0.1:7000"
+            cmd: |
+            /app/llama-server
+            -m /models/Qwen3-4B-Instruct-2507-UD-Q4_K_XL.gguf
+            # or use `-hf unsloth/Qwen3-4B-Instruct-2507-GGUF:Q4_K_XL` for HuggingFace
+            --port 7000
+    ```
+
+    **vLLM (Docker)**
+    ```yaml
+    models:
+        "qwen3-4b":
+            proxy: "http://127.0.0.1:7000"
+            cmd: |
+            docker run --name qwen-vllm
+            --init --rm -p 7000:8080
+            --ipc=host \
+            vllm/vllm-openai:latest
+            -m /models/Qwen/Qwen3-4B-Instruct-2507
+            cmdStop: docker stop qwen-vllm
+    ```
+
+    **vLLM (local)**:
+    ```yaml
+    models:
+        "qwen3-4b":
+            proxy: "http://127.0.0.1:7000"
+            cmd: |
+            source /app/vllm/.venv/bin/activate && \
+            /app/vllm/.venv/bin/vllm serve \
+            --port 7000 \
+            --host 0.0.0.0 \
+            -m /models/Qwen/Qwen3-4B-Instruct-2507
+            cmdStop: pkill -f "vllm serve"
+    ```
+
+3. Install the container:
+    
+    We use the `cuda` tag here, but llama-swap offers `cpu`, `intel`, `vulkan`, and `musa` tags as well. Releases can be found [here](https://github.com/mostlygeek/llama-swap/pkgs/container/llama-swap).
+
+    **llama.cpp**
+    ```bash
+    sudo docker run -d --gpus all --restart unless-stopped --network app-net --pull=always --name llama-swap -p 9292:8080 \
+    -v /path/to/models:/models \
+    -v /home/<your_username>/llama-swap/config.yaml:/app/config.yaml \
+    -v /home/<your_username>/llama.cpp/build/bin/llama-server:/app/llama-server \
+    ghcr.io/mostlygeek/llama-swap:cuda
+    ```
+
+    **vLLM (Docker/local)**
+    ```bash
+    sudo docker run -d --gpus all --restart unless-stopped --network app-net --pull=always --name llama-swap -p 9292:8080 \
+    -v /path/to/models:/models \
+    -v /home/<your_username>/vllm:/app/vllm \
+    -v /home/<your_username>/llama-swap/config.yaml:/app/config.yaml \
+    ghcr.io/mostlygeek/llama-swap:cuda
+    ```
+
+    > Replace <your_username> with your actual username and `/path/to/models` with the path to your model files.
+
+> [!NOTE]
+> llama-swap prefers Docker-based vLLM due to cleanliness of environments and adherence to SIGTERM signals sent by the server. I've written out both options here.
+
+This should result in a functioning llama-swap instance running at `http://localhost:9292`, which can be confirmed by running `curl http://localhost:9292/health`. It is **highly recommended** that you read the [configuration documentation](https://github.com/mostlygeek/llama-swap/wiki/Configuration). llama-swap is thoroughly documented and highly configurable - utilizing its capabilities will result in a tailored setup ready to deploy as you need it.
+
+### `systemd` Service
+
+The other way to persist a model across system reboots is to start the inference engine in a `.service` file that will run alongside the Linux operating system when booting, ensuring that it is available whenever the server is on. If you're willing to live with the relative compromise of not being able to swap models/backends and are satisfied with running one model, this is the lowest overhead solution and works great.
 
 Let's call the service we're about to build `llm-server.service`. We'll assume all models are in the `models` child directory - you can change this as you need to.
 
@@ -589,65 +858,39 @@ Let's call the service we're about to build `llm-server.service`. We'll assume a
 4. Run the service:
 
     If `llm-server.service` doesn't exist:
-    ```
+    ```bash
     sudo systemctl enable llm-server.service
     sudo systemctl start llm-server
     ```
 
     If `llm-server.service` does exist:
-    ```
+    ```bash
     sudo systemctl restart llm-server
     ```
 5. (Optional) Check the service's status:
     ```bash
-    sudo systemctl status llama-server
+    sudo systemctl status llm-server
     ```
 
 ### Open WebUI Integration
-> [!NOTE]
-> Only needed for llama.cpp/vLLM.
+
+#### llama-swap
 
 Navigate to `Admin Panel > Settings > Connections` and set the following values:
 
 - Enable OpenAI API
-- API Base URL: `http://host.docker.internal:<port>/v1`
+- API Base URL: `http://llama-swap:8080/v1`
 - API Key: `anything-you-like`
 
-### Ollama vs. llama.cpp
+#### `systemd` Service
 
-| **Aspect**                 | **Ollama (Wrapper)**                                          | **llama.cpp (Vanilla)**                                                                   |
-| -------------------------- | ------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| **Installation/Setup**     | One-click install & CLI model management                      | Requires manual setup/configuration                                                       |
-| **Open WebUI Integration** | First-class citizen                                           | Requires OpenAI-compatible endpoint setup                                                 |
-| **Model Switching**        | Native model-switching via server                             | Requires manual port management or [llama-swap](https://github.com/mostlygeek/llama-swap) |
-| **Customizability**        | Limited: Modelfiles are cumbersome                            | Full control over parameters via CLI                                                      |
-| **Transparency**           | Defaults may override model parameters (e.g., context length) | Full transparency in parameter settings                                                   |
-| **GGUF Support**           | Inherits llama.cpp's best-in-class implementation             | Best GGUF implementation                                                                  |
-| **GPU-CPU Splitting**      | Inherits llama.cpp's efficient splitting                      | Trivial GPU-CPU splitting out-of-the-box                                                  |
+Follow the same steps as above.
 
----
+- Enable OpenAI API
+- API Base URL: `http://localhost:<port>/v1`
+- API Key: `anything-you-like`
 
-### vLLM vs. Ollama/llama.cpp
-| **Feature**             | **vLLM**                                     | **Ollama/llama.cpp**                                                                  |
-| ----------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------- |
-| **Vision Models**       | Supports Qwen 2.5 VL, Llama 3.2 Vision, etc. | Ollama supports some vision models, llama.cpp does not support any (via llama-server) |
-| **Quantization**        | Supports AWQ, GPTQ, BnB, etc.                | Only supports GGUF                                                                    |
-| **Multi-GPU Inference** | Yes                                          | Yes                                                                                   |
-| **Tensor Parallelism**  | Yes                                          | No                                                                                    |
-
-In summary,
-
-- **Ollama**: Best for those who want an "it just works" experience.
-- **llama.cpp**: Best for those who want total control over their inference servers and are familiar with engine arguments.
-- **vLLM**: Best for those who want (i) to run non-GGUF quantizations of models, (ii) multi-GPU inference using tensor parallelism, or (iii) to use vision models.
-
-Using Ollama as a service offers no degradation in experience because unused models are offloaded from VRAM after some time. Using vLLM or llama.cpp as a service keeps a model in memory, so I wouldn't use this alongside Ollama in an automated, always-on fashion unless it was your primary inference engine. Essentially,
-
-| Primary Engine | Secondary Engine | Run SE as service? |
-| -------------- | ---------------- | ------------------ |
-| Ollama         | llama.cpp/vLLM   | No                 |
-| llama.cpp/vLLM | Ollama           | Yes                |
-
+> Replace `<port>` with your desired port.
 
 ## Chat Platform
 
@@ -659,23 +902,302 @@ Using Ollama as a service offers no degradation in experience because unused mod
 Open WebUI is a web-based interface for managing models and chats, and provides a beautiful, performant UI for communicating with your models. You will want to do this if you want to access your models from a web interface. If you're fine with using the command line or want to consume models through a plugin/extension, you can skip this step.
 
 To install without Nvidia GPU support, run the following command:
-```
-sudo docker run -d -p 3000:8080 --add-host=host.docker.internal:host-gateway -v open-webui:/app/backend/data --name open-webui --restart always ghcr.io/open-webui/open-webui:main
+```bash
+sudo docker run -d -p 3000:8080 --network app-net --add-host=host.docker.internal:host-gateway -v open-webui:/app/backend/data --name open-webui --restart always ghcr.io/open-webui/open-webui:main
 ```
 
 For Nvidia GPUs, run the following command:
-```
-sudo docker run -d -p 3000:8080 --gpus all --add-host=host.docker.internal:host-gateway -v open-webui:/app/backend/data --name open-webui --restart always ghcr.io/open-webui/open-webui:cuda
+```bash
+sudo docker run -d -p 3000:8080 --network app-net --gpus all --add-host=host.docker.internal:host-gateway -v open-webui:/app/backend/data --name open-webui --restart always ghcr.io/open-webui/open-webui:cuda
 ```
 
 You can access it by navigating to `http://localhost:3000` in your browser or `http://<server_ip>:3000` from another device on the same network. There's no need to add this to the `init.bash` script as Open WebUI will start automatically at boot via Docker Engine.
 
 Read more about Open WebUI [here](https://github.com/open-webui/open-webui).
 
-## Text-to-Speech Server
+## MCP Proxy Server
 
-> [!NOTE]
-> `host.docker.internal` is a magic hostname that resolves to the internal IP address assigned to the host by Docker. This allows containers to communicate with services running on the host, such as databases or web servers, without needing to know the host's IP address. It simplifies communication between containers and host-based services, making it easier to develop and deploy applications.
+Model Context Protocol (MCP) is a protocol that tools (functions/scripts written in code) to LLMs in a standardized way. Generally, models are being trained more and more with the ability to natively call tools in order to power agentic tasks - think along the lines of having a model use sequential thinking to formulate multiple thoughts, execute multiple targeted web searches, and provide a response leveraging real-time information. MCP also, probably more importantly for most people, enables models to call third-party tools like those for GitHub, Azure, etc. A complete list, curated and maintained by Anthropic, can be found [here](https://github.com/modelcontextprotocol/servers).
+
+Most guides on the Internet concerning MCP will have you spin up an MCP server via a client like VS Code, Cline, etc. since most agentic uses are for coding or Claude Desktop, which is a proprietary app by Anthropic and not at all what we're aiming to achieve in this guide with respect to privacy. There *are* other chat clients that support MCP server management from the UI itself (LobeChat, Cherry Studio, etc.), but we want to be able to manage MCP servers in a central and modular way. That way, (i) they aren't tied to a specific client and are available to every client you may use them with and (ii) if you switch chat platforms in the future, your MCP servers require zero changes because they run as a decoupled service - little bit more maintenance for a lot more flexibility down the line. We can do this by setting up an MCP proxy server.
+
+This proxy server will take the MCP servers running via stdio (standard IO) protocol (that can only be accessed by an application running on that device) and make them compatible with streamable HTTP. Any MCP-enabled client can use streamable HTTP so they'll also be able to use all the servers we install on our physical server. This centralizes the management of your MCP servers: create/edit/delete servers in one place, use any of them from your various clients (Open WebUI, VS Code, etc.).
+
+We'll use the [fetch](https://github.com/zcaceres/fetch-mcp), [sequential-thinking](https://github.com/arben-adm/mcp-sequential-thinking), and [searxng](https://github.com/ihor-sokoliuk/MCP-searxng) MCP servers to get started. The process for adding more servers will be identical.
+
+### mcp-proxy
+
+🌟 [**GitHub**](https://github.com/sparfenyuk/mcp-proxy)  
+
+mcp-proxy is a server proxy that allows switching between transports (stdio to streamable HTTP and vice versa). I'll be using port 3131 to avoid conflicts - feel free to change this as you need to. I will also be extending mcp-proxy to include `uv`: most MCP servers use either `npx` or `uv` and setting mcp-proxy up without `uv` is going to hamper your ability to run the MCP servers you'd like. If you don't require `uv`, (i) don't add the `build` section in the compose file and (ii) skip step 4.
+
+1. Create a compose file
+    ```bash
+    mkdir mcp-proxy
+    cd mcp-proxy
+    sudo nano docker-compose.yaml
+    ```
+
+2. Enter the following:
+    ```yaml
+    services:
+    mcp-proxy:
+        container_name: mcp-proxy
+        build:
+            context: .
+            dockerfile: Dockerfile
+        networks:
+        - app-net
+        volumes:
+        - .:/config
+        - /:/<server_hostname>:ro
+        restart: unless-stopped
+        ports:
+        - 3131:3131
+        command: "--pass-environment --port=3131 --host 0.0.0.0 --transport streamablehttp --named-server-config /config/servers.json"
+
+    networks:
+    app-net:
+        external: true
+    ```
+
+    > Replace `<server_hostname>` with your actual server's hostname (or whatever else). This is primarily useful when adding `filesystem` or similar MCP servers that read from and write files to the file system. Feel free to skip if that isn't your goal.
+
+3. Create a `servers.json` file:
+    ```json
+    {
+        "mcpServers": {
+            "fetch": {
+                "disabled": false,
+                "timeout": 60,
+                "command": "uvx",
+                "args": [
+                    "mcp-server-fetch"
+                ],
+                "transportType": "stdio"
+            },
+            "sequential-thinking": {
+                "command": "npx",
+                "args": [
+                    "-y",
+                    "@modelcontextprotocol/server-sequential-thinking"
+                ]
+            },
+            "searxng": {
+                "command": "npx",
+                "args": ["-y", "mcp-searxng"],
+                "env": {
+                    "SEARXNG_URL": "http://searxng:8080/search?q=<query>"
+                }
+            }
+        }
+    }
+    ```
+
+4. Create a `Dockerfile`:
+    ```bash
+    sudo nano Dockerfile
+    ```
+    Enter the following:
+    ```Dockerfile
+    FROM ghcr.io/sparfenyuk/mcp-proxy:latest
+
+    # Install dependencies for nvm and Node.js
+    RUN apk add --update npm
+
+    # Install the 'uv' package
+    RUN python3 -m ensurepip && pip install --no-cache-dir uv
+
+    ENV PATH="/usr/local/bin:/usr/bin:$PATH" \
+        UV_PYTHON_PREFERENCE=only-system
+
+    ENTRYPOINT ["catatonit", "--", "mcp-proxy"]
+    ```
+
+5. Start the container with `sudo docker compose up -d`
+
+Your mcp-proxy container should be up and running! Adding servers is simple: add the relevant server to `servers.json` (you can use the same configuration that the MCP server's developer provides for VS Code, it's identical) and then restart the container with `sudo docker restart mcp-proxy`.
+
+### MCPJungle
+
+🌟 [**GitHub**](https://github.com/mcpjungle/MCPJungle?tab=readme-ov-file)  
+
+MCPJungle is another MCP proxy server with a different focus. It focuses on providing more of a "production-grade" experience, a lot of which is disabled by default in the development mode of the application. We'll use the standard development version of the container here on port 4141.
+
+1. Create a compose file:
+    ```bash
+    mkdir mcpjungle
+    cd mcpjungle
+    sudo nano docker-compose.yaml
+    ```
+
+   Enter the following and save:
+
+    ```yaml
+    # MCPJungle Docker Compose configuration for individual users.
+    # Use this compose file if you want to run MCPJungle locally for your personal MCP management & Gateway.
+    # The mcpjungle server runs in development mode.
+    services:
+    db:
+        image: postgres:latest
+        container_name: mcpjungle-db
+        environment:
+            POSTGRES_USER: mcpjungle
+            POSTGRES_PASSWORD: mcpjungle
+            POSTGRES_DB: mcpjungle
+        ports:
+        - "5432:5432"
+        networks:
+        - app-net
+        volumes:
+        - db_data:/var/lib/postgresql/data
+        healthcheck:
+            test: ["CMD-SHELL", "PGPASSWORD=mcpjungle pg_isready -U mcpjungle"]
+            interval: 10s
+            timeout: 5s
+            retries: 5
+        restart: unless-stopped
+
+    mcpjungle:
+        image: mcpjungle/mcpjungle:${MCPJUNGLE_IMAGE_TAG:-latest-stdio}
+        container_name: mcpjungle-server
+        environment:
+            DATABASE_URL: postgres://mcpjungle:mcpjungle@db:5432/mcpjungle
+            SERVER_MODE: ${SERVER_MODE:-development}
+            OTEL_ENABLED: ${OTEL_ENABLED:-false}
+        ports:
+        - "4141:8080"
+        networks:
+        - app-net
+        volumes:
+        # Mount host filesystem current directory to enable filesystem MCP server access
+        - .:/host/project:ro
+        - /home/<your_username>:/host:ro
+        # Other options:
+        # - ${HOME}:/host/home:ro
+        # - /tmp:/host/tmp:rw
+        depends_on:
+        db:
+            condition: service_healthy
+        restart: always
+
+    volumes:
+        db_data:
+
+    networks:
+    app-net:
+        external: true
+    ```
+
+2. Start the container with `sudo docker compose up -d`
+
+3. Create a tool file:
+    ```bash
+    sudo nano fetch.json
+    ```
+
+    Enter the following and save:
+    ```json
+    {
+        "name": "fetch",
+        "transport": "stdio",
+        "command": "npx",
+        "args": ["mcp-server-fetch"]
+    }
+    ```
+
+4. Register the tool:
+    ```bash
+    sudo docker exec -i mcpjungle-server /mcpjungle register -c /host/project/fetch.json
+    ```
+
+Repeat steps 3 and 4 for every tool mentioned. Commands for `sequential-thinking` and `searxng` can be found below.
+
+**sequential-thinking**
+```json
+{
+    "name": "sequential-thinking",
+    "transport": "stdio",
+    "command": "npx",
+    "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"]
+}
+```
+
+**searxng**
+```json
+{
+    "name": "searxng",
+    "transport": "stdio",
+    "command": "npx",
+    "args": ["-y", "mcp-searxng"],
+    "env": {
+        "SEARXNG_URL": "http://searxng:8080/search?q=<query>"
+    }
+}
+```
+
+### Comparison
+
+The choice between the two services is yours entirely: I use mcp-proxy because I find the workflow slightly less cumbersome than MCPJungle. Here's a comparison with the stengths of each service.
+
+**mcp-proxy > MCPJungle**
+
+- Servers can just be added to `servers.json` and will be registered automatically on container restart - MCPJungle requires manual registration of tools via the CLI
+- Uses the standard MCP syntax that most clients accept for configuration
+- Lighter footprint in that it doesn't need to spin up a separate database container
+- Uses stateful connections - MCPJungle spins up a new connection per tool call, which can lead to some performance overhead
+
+**MCPJungle > mcp-proxy**
+
+- Combines all tools under one endpoint, making it very easy to integrate into a chat frontend
+- Capable of creating a very configurable setup with tool groups, access control, selective tool enabling/disabling
+- Supports enterprise features like telemetry
+
+### Open WebUI Integration
+
+Open WebUI recently added support for streamable HTTP - where once you may have had to use [mcpo](https://github.com/open-webui/mcpo), Open WebUI's way of automatically generating an OpenAPI-compatible HTTP server, you can use the MCP servers you've set up as-is with no changes.
+
+#### mcp-proxy
+
+Navigate to `Admin Panel > Settings > External Tools`. Click the `+` button to add a new tool and enter the following information:
+
+- URL: `http://mcp-proxy:<port>/servers/<tool_name>/mcp`
+- API Key: `anything-you-like`
+- ID: `<tool_name>`
+- Name: `<tool_name>`
+
+> Replace `<port>` with the port of the MCP service and `<tool_name>` with the specific tool you're adding.
+
+#### MCPJungle
+
+Follow the same steps as above. By design, MCPJungle exposes all tools via one endpoint, so you should only have to add once:
+
+- URL: `http://mcpjungle-server:8080/mcp`
+- API Key: `anything-you-like`
+- ID: `<tool_name>`
+- Name: `<tool_name>`
+
+
+### VS Code/Claude Desktop Integration
+
+The steps for integrating your MCP proxy server in another client such as VS Code (Claude Desktop, Zed, etc.) will be similar, if not exactly the same.
+
+Add the following key and value to your `mcp.json` file:
+
+```json
+"your-mcp-proxy-name": {
+    "timeout": 60,
+    "type": "stdio",
+    "command": "npx",
+    "args": [
+    "mcp-remote",
+    "http://<your-server-url>/mcp",
+    "--allow-http"
+    ]
+}
+```
+
+## Text-to-Speech Server
 
 ### Kokoro FastAPI
 
@@ -684,7 +1206,7 @@ Read more about Open WebUI [here](https://github.com/open-webui/open-webui).
 Kokoro FastAPI is a text-to-speech server that wraps around and provides OpenAI-compatible API inference for [Kokoro-82M](https://huggingface.co/hexgrad/Kokoro-82M), a state-of-the-art TTS model. The documentation for this project is fantastic and covers most, if not all, of the use cases for the project itself.
 
 To install Kokoro-FastAPI, run
-```
+```bash
 git clone https://github.com/remsky/Kokoro-FastAPI.git
 cd Kokoro-FastAPI
 sudo docker compose up --build
@@ -760,7 +1282,7 @@ Now, we have to download and load a model. Here, we'll use FLUX.1 [dev], a new, 
 
     Otherwise, to run it just once, simply execute the above lines in a terminal window.
 
-#### Open WebUI Integration
+### Open WebUI Integration
 
 Navigate to `Admin Panel > Settings > Images` and set the following values:
 
@@ -810,18 +1332,32 @@ Setting up a firewall is essential for securing your server. The Uncomplicated F
     ```bash
     sudo apt install ufw
     ```
-- Allow SSH, HTTPS, and any other ports you need:
+
+- Allow SSH, HTTPS, and HTTP to your local network:
     ```bash
-    sudo ufw allow ssh https 80 8080 # [your other services' ports]
+    # Allow all <ip_range> hosts access to port <port>
+    sudo ufw allow from <ip_range> to any port <port> proto tcp
     ```
-    Here, we're allowing SSH (port 22), HTTPS (port 443), HTTP (port 80), Docker (port 8080) to start. You can add or remove ports as needed. Ensure to add ports for services that you end up using - both from this guide and in general.
+    
+    Start with running the above command to open ports 22 (SSH), 80 (HTTP), and 443 (HTTPS) to our local network. Since we use the `app-net` Docker network for our containers, there's no need to open anything else up. Open ports up carefully, ideally only to specific IPs or to your local network. To allow a port for a specific IP, you can replace the IP range with a single IP and it'll work exactly the same way.
+
+> [!TIP]
+> You can find your local network's IP address range by running `ip route show`. The result will be something like this:
+> ```
+> me@my-cool-server:~$ ip route show
+> default via <router_ip> dev enp3s0 proto dhcp src <server_ip> metric 100
+> <network_ip_range> dev enp3s0 proto kernel scope link src <server_ip> metric 100
+> # more routes
+> ```
+
 - Enable UFW:
     ```bash
     sudo ufw enable
     ```
+
 - Check the status of UFW:
     ```bash
-    sudo ufw status
+    sudo ufw status verbose
     ```
 
 > [!WARNING]
@@ -878,45 +1414,6 @@ To use a Mullvad exit on one of your devices, first find the exit node you want 
 > [!WARNING]
 > Ensure the device is allowed to use the Mullvad add-on through the Admin Console first.
 
-## Verifying
-
-This section isn't strictly necessary by any means - if you use all the elements in the guide, a good experience in Open WebUI means you've succeeded with the goal of the guide. However, it can be helpful to test the disparate installations at different stages in this process.
-
-### Inference Engine
-
-To test your OpenAI-compatible server endpoint, run:
-```
-curl http://localhost:<port>/v1/completions -d '{
-  "model": "llama2",
-  "prompt":"Why is the sky blue?"
-}'
-```
-> Replace `<port>` with the actual port of your server and `llama2` with your preferred model. If your physical server is different than the machine you're executing the above command on, replace `localhost` with the IP of the physical server.
-
-### Open WebUI
-
-Visit `http://localhost:3000`. If you're greeted by the authentication page, you've successfully installed Open WebUI.
-
-### Text-to-Speech Server
-
-To test your TTS server, run the following command:
-```
-curl -s http://localhost:<port>/v1/audio/speech -H "Content-Type: application/json" -d '{
-    "input": "The quick brown fox jumped over the lazy dog."}' > speech.mp3
-```
-
-If you see the `speech.mp3` file in the directory you ran the command from, you should be good to go. If you're paranoid, test it using a player like `aplay`. Run the following commands:
-```
-sudo apt install aplay
-aplay speech.mp3
-```
-
-Kokoro FastAPI: To test the web UI, visit `http://localhost:7860`.
-
-### ComfyUI
-
-Visit `http://localhost:8188`. If you're greeted by the workflow page, you've successfully installed ComfyUI.
-
 ## Updating
 
 Updating your system is a good idea to keep software running optimally and with the latest security patches. Updates to Ollama allow for inference from new model architectures and updates to Open WebUI enable new features like voice calling, function calling, pipelines, and more.
@@ -966,6 +1463,16 @@ pip install vllm --upgrade
 
 For a Docker installation, you're good to go when you re-run your Docker command, because it pulls the latest Docker image for vLLM.
 
+### llama-swap
+
+Delete the current container:
+```bash
+sudo docker stop llama-swap
+sudo docker rm llama-swap
+```
+
+Re-run the container command from the [llama-swap section](#llama-swap).
+
 ### Open WebUI
 
 To update Open WebUI once, run the following command:
@@ -978,9 +1485,19 @@ To keep it updated automatically, run the following command:
 docker run -d --name watchtower --volume /var/run/docker.sock:/var/run/docker.sock containrrr/watchtower open-webui
 ```
 
+### mcp-proxy/MCPJungle
+
+Navigate to the directory and pull the latest container image:
+```bash
+cd mcp-proxy # or mcpjungle
+sudo docker compose down
+sudo docker compose pull
+sudo docker compose up -d
+```
+
 ### Kokoro FastAPI
 
-Navigate to the directory and pull the latest image from Docker:
+Navigate to the directory and pull the latest container image:
 ```
 cd Kokoro-FastAPI
 sudo docker compose pull
