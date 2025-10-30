@@ -941,7 +941,7 @@ mcp-proxy is a server proxy that allows switching between transports (stdio to s
 2. Enter the following:
     ```yaml
     services:
-    mcp-proxy:
+      mcp-proxy:
         container_name: mcp-proxy
         build:
             context: .
@@ -957,7 +957,7 @@ mcp-proxy is a server proxy that allows switching between transports (stdio to s
         command: "--pass-environment --port=3131 --host 0.0.0.0 --transport streamablehttp --named-server-config /config/servers.json"
 
     networks:
-    app-net:
+      app-net:
         external: true
     ```
 
@@ -1038,7 +1038,7 @@ MCPJungle is another MCP proxy server with a different focus. It focuses on prov
     # Use this compose file if you want to run MCPJungle locally for your personal MCP management & Gateway.
     # The mcpjungle server runs in development mode.
     services:
-    db:
+      db:
         image: postgres:latest
         container_name: mcpjungle-db
         environment:
@@ -1058,7 +1058,7 @@ MCPJungle is another MCP proxy server with a different focus. It focuses on prov
             retries: 5
         restart: unless-stopped
 
-    mcpjungle:
+      mcpjungle:
         image: mcpjungle/mcpjungle:${MCPJUNGLE_IMAGE_TAG:-latest-stdio}
         container_name: mcpjungle-server
         environment:
@@ -1085,7 +1085,7 @@ MCPJungle is another MCP proxy server with a different focus. It focuses on prov
         db_data:
 
     networks:
-    app-net:
+      app-net:
         external: true
     ```
 
