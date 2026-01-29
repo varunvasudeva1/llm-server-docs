@@ -22,6 +22,8 @@ Software Stack:
   - [Priorities](#priorities)
   - [Prerequisites](#prerequisites)
   - [General](#general)
+    - [Allow `sudo` Permissions](#allow-sudo-permissions)
+    - [Update System Packages](#update-system-packages)
     - [Schedule Startup Script](#schedule-startup-script)
     - [Configure Script Permissions](#configure-script-permissions)
     - [Configure Auto-Login (optional)](#configure-auto-login-optional)
@@ -121,9 +123,9 @@ Any modern CPU and GPU combination should work for this guide. Previously, compa
 
 For reference, this guide was built around the following system:
 - **CPU**: Intel Core i5-12600KF
-- **Memory**: 64GB 3200MHz DDR4 RAM
+- **Memory**: 96GB 3200MHz DDR4 RAM
 - **Storage**: 1TB M.2 NVMe SSD
-- **GPU**: Nvidia RTX 3090 (24GB), Nvidia RTX 3060 (12GB)
+- **GPU**: 2x Nvidia RTX 3090 (24GB)
 
 > [!NOTE]
 > **AMD GPUs**: Power limiting is skipped for AMD GPUs as [AMD has recently made it difficult to set power limits on their GPUs](https://www.reddit.com/r/linux_gaming/comments/1b6l1tz/no_more_power_limiting_for_amd_gpus_because_it_is/). Naturally, skip any steps involving `nvidia-smi` or `nvidia-persistenced` and the power limit in the `init.bash` script.
@@ -152,30 +154,57 @@ I also recommend installing a lightweight desktop environment like XFCE for ease
 
 ## General
 
-Update the system by running the following commands:
-```
-sudo apt update
-sudo apt upgrade
-```
+### Allow `sudo` Permissions
+
+To do a bunch of things in this guide, we need to be root. But we don't have the ability to act as root until root allows our user to. First, we'll switch to root and grant our user permission to run commands with `sudo`.
+
+> [!TIP]
+> `sudo` stands for "superuser doer" - in Linux, it signals to the OS that you want the command you're running to be running on behalf of the root user. This should be used sparingly on a highly secure system (we want user-specific permissions for most processes) and carefully since it can affect the system with the same power as the root user. Don't overthink its use or worry when using it - just know that it **can** be dangerous if used incorrectly.
+
+- Switch to root:
+    ```bash
+    su root
+    ```
+
+- Run the following command to add your user to the `sudo` group (which has the permissions we're looking for):
+    ```bash
+    sudo usermod -a -G sudo <username>
+    ```
+    > Replace `<username>` with your username.
+
+    Save and exit (`Ctrl+X`).
+- Close your existing terminal and open a new session. This is required to see the changes.
+- (Optional) Test your new permissions by running `ls` (command to view the contents of a directory) with `sudo`:
+    ```bash
+    sudo ls
+    ```
+
+### Update System Packages
+
+- Update the system by running the following commands:
+    ```
+    sudo apt update
+    sudo apt upgrade
+    ```
 
 Now, we'll install the required GPU drivers that allow programs to utilize their compute capabilities.
 
 **Nvidia GPUs**
 - Follow Nvidia's [guide on downloading CUDA Toolkit](https://developer.nvidia.com/cuda-downloads?target_os=Linux&target_arch=x86_64&Distribution=Debian). The instructions are specific to your machine and the website will lead you to them interactively.
 - Run the following commands:
-    ```
+    ```bash
     sudo apt install linux-headers-amd64
     sudo apt install nvidia-driver firmware-misc-nonfree
     ```
 - Reboot the server.
 - Run the following command to verify the installation:
-    ```
+    ```bash
     nvidia-smi
     ```
   
 **AMD GPUs**
 - Run the following commands:
-    ```
+    ```bash
     deb http://deb.debian.org/debian bookworm main contrib non-free-firmware
     apt-get install firmware-amd-graphics libgl1-mesa-dri libglx-mesa0 mesa-vulkan-drivers xserver-xorg-video-all
     ```
@@ -238,7 +267,7 @@ We want `init.bash` to run the `nvidia-smi` commands without having to enter a p
 
 AMD users can skip this step as power limiting is not supported on AMD GPUs.
 
-- Run the following command:
+- Run the following command to edit the sudoers file:
     ```bash
     sudo visudo
     ```
@@ -255,7 +284,7 @@ AMD users can skip this step as power limiting is not supported on AMD GPUs.
 
 ### Configure Auto-Login (optional)
 
-When the server boots up, we want it to automatically log in to a user account and run the `init.bash` script. This is done by configuring the `lightdm` display manager.
+When the server boots up, we may want it to automatically log in to a user account and run the `init.bash` script. This is done by configuring the `lightdm` display manager.
 
 - Run the following command:
     ```bash
@@ -1585,6 +1614,9 @@ This is my first foray into setting up a server and ever working with Linux so t
 - Ensure your power supply has enough headroom for transient spikes (particularly in multi GPU setups) or you may face random shutdowns. Your GPU can blow past its rated power draw and also any software limit you set for it based on the chip's actual draw. I usually aim for +50% of my setup's estimated total power draw.
 
 ## References
+
+Adding user to `sudo` group:
+- https://askubuntu.com/questions/168280/how-do-i-grant-sudo-privileges-to-an-existing-user
 
 Downloading Nvidia drivers:
 - https://developer.nvidia.com/cuda-downloads?target_os=Linux&target_arch=x86_64&Distribution=Debian
