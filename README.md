@@ -387,7 +387,7 @@ sudo docker exec -it llama-swap curl http://open-webui:8080
 
 ### Helpful Commands
 
-In the process of setting up this server (or anywhere down the rabbit hole of setting up services), you're likely to use Docker often. For the uninititated, here are helpful commands that will make navigating and troubleshooting containers easier:
+In the process of setting up this server (or anywhere down the rabbit hole of setting up services), you're likely to use Docker often. For the uninitiated, here are helpful commands that will make navigating and troubleshooting containers easier:
 
 - See available/running containers: `sudo docker ps -a`
 - Restart a container: `sudo docker restart <container_name>`
@@ -475,8 +475,6 @@ To power our search-based workflows, we don't want to rely on a search provider 
 
 1. Start the container:
     ```bash
-    mkdir searxng
-    cd searxng
     sudo docker pull searxng/searxng
     export PORT=5050
     sudo docker run \
@@ -492,7 +490,7 @@ To power our search-based workflows, we don't want to rely on a search provider 
 
 2. Edit `settings.yml` to include JSON format support:
     ```bash
-    sudo nano settings.yml
+    sudo nano searxng/settings.yml
     ```
 
     Add the following:
@@ -1244,7 +1242,7 @@ ComfyUI is a popular open-source graph-based tool for generating images using im
     ```
 - Set up a new virtual environment:
     ```
-    python3 venv -m comfyui-env
+    python3 -m venv comfyui-env
     source comfyui-env/bin/activate
     ```
 - Download the platform-specific dependencies:
