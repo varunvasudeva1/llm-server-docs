@@ -28,8 +28,10 @@ Software Stack:
     - [Configure Script Permissions](#configure-script-permissions)
     - [Configure Auto-Login (optional)](#configure-auto-login-optional)
   - [Docker](#docker)
+    - [Add User to Docker Group](#add-user-to-docker-group)
     - [Nvidia Container Toolkit](#nvidia-container-toolkit)
     - [Create a Network](#create-a-network)
+    - [Harden Docker Containers](#harden-docker-containers)
     - [Helpful Commands](#helpful-commands)
   - [HuggingFace CLI](#huggingface-cli)
     - [Manage Models](#manage-models)
@@ -87,6 +89,7 @@ Software Stack:
     - [Kokoro FastAPI](#kokoro-fastapi-1)
     - [ComfyUI](#comfyui-1)
   - [Troubleshooting](#troubleshooting)
+    - [Docker](#docker-1)
     - [`ssh`](#ssh-1)
     - [Nvidia Drivers](#nvidia-drivers)
     - [Ollama](#ollama-2)
@@ -112,6 +115,7 @@ The process involves installing the requisite drivers, setting the GPU power lim
 
 - **Simplicity**: It should be relatively straightforward to set up the components of the solution.
 - **Stability**: The components should be stable and capable of running for weeks at a time without any intervention necessary.
+- **Security**: The components should be able to be tightly secured and limited in their capability to damage the system in case of a known vulnerability affecting any of the components.
 - **Maintainability**: The components and their interactions should be uncomplicated enough that you know enough to maintain them as they evolve (because they *will* evolve).
 - **Aesthetics**: The result should be as close to a cloud provider's chat platform as possible. A homelab solution doesn't necessarily need to feel like it was cobbled together haphazardly.
 - **Modularity**: Components in the setup should be able to be swapped out for newer/more performant/better maintained alternatives easily. Standard protocols (OpenAI-compatibility, MCPs, etc.) help with this a lot and, in this guide, they are always preferred over bundled solutions.
@@ -206,7 +210,7 @@ Now, we'll install the required GPU drivers that allow programs to utilize their
 - Run the following commands:
     ```bash
     deb http://deb.debian.org/debian bookworm main contrib non-free-firmware
-    apt-get install firmware-amd-graphics libgl1-mesa-dri libglx-mesa0 mesa-vulkan-drivers xserver-xorg-video-all
+    apt install firmware-amd-graphics libgl1-mesa-dri libglx-mesa0 mesa-vulkan-drivers xserver-xorg-video-all
     ```
 - Reboot the server.
 
@@ -308,34 +312,70 @@ When the server boots up, we may want it to automatically log in to a user accou
 Docker is a containerization platform that allows you to run applications in isolated environments. This subsection follows [Docker's guide](https://docs.docker.com/engine/install/debian/) to install Docker Engine on Debian. The commands are listed below, but visiting the guide is recommended in case instructions have changed.
 
 - If you already have a Docker installation on your system, it's a good idea to re-install so there are no broken/out-of-date dependencies. The command below will iterate through your system's installed packages and remove the ones associated with Docker.
-    ```
-    for pkg in docker.io docker-doc docker-compose podman-docker containerd runc; do sudo apt-get remove $pkg; done
+    ```bash
+    for pkg in docker.io docker-doc docker-compose podman-docker containerd runc; do sudo apt purge $pkg; done
     ```
 
 - Run the following commands:
     ```bash
     # Add Docker's official GPG key:
-    sudo apt-get update
-    sudo apt-get install ca-certificates curl
+    sudo apt update
+    sudo apt install ca-certificates curl
     sudo install -m 0755 -d /etc/apt/keyrings
     sudo curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc
     sudo chmod a+r /etc/apt/keyrings/docker.asc
 
     # Add the repository to Apt sources:
-    echo \
-    "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian \
-    $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
-    sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-    sudo apt-get update
+    sudo tee /etc/apt/sources.list.d/docker.sources <<EOF
+    Types: deb
+    URIs: https://download.docker.com/linux/debian
+    Suites: $(. /etc/os-release && echo "$VERSION_CODENAME")
+    Components: stable
+    Signed-By: /etc/apt/keyrings/docker.asc
+    EOF
+
+    sudo apt update
     ```
 - Install the Docker packages:
     ```bash
-    sudo apt-get install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+    sudo apt install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
     ```
-- Verify the installation:
+- Verify the installation (optional):
     ```bash
-    sudo docker run hello-world
+    sudo systemctl status docker
     ```
+
+    If it hasn't started, try manually starting the daemon:
+    ```bash
+    sudo systemctl start docker
+    ```
+
+### Add User to Docker Group
+
+So that we can forgo the use of `sudo` for Docker commands and run them directly under our user, we will add our user to the `docker` group. This isn't strictly necessary but convenient. This sub-section uses [Docker's own post-install documentation](https://docs.docker.com/engine/install/linux-postinstall/) as a reference - have a look just in case things have changed since the time of writing.
+
+> [!CAUTION]
+> Being in the `docker` group grants significant system access - effectively root-equivalent privileges to the Docker daemon. Only add trusted users to this group.
+
+1. Add your user to the Docker group:
+    ```bash
+    sudo usermod -aG docker $USER
+    ```
+
+2. Apply the changes:
+    ```bash
+    newgrp docker
+    ```
+    
+3. Verify your new permissions by checking running containers:
+    ```bash
+    docker ps -a
+    ```
+
+If you encounter "permission denied" and Docker commands still require sudo, log out and log back in.
+
+> [!NOTE]
+> If you decide not to do this, you will need to append `sudo` in front of any `docker` commands.
 
 ### Nvidia Container Toolkit
 
@@ -351,17 +391,17 @@ You will most likely want to use GPUs via Docker - this will require Nvidia Cont
 
 2. Update packages:
     ```bash
-    sudo apt-get update
+    sudo apt update
     ```
 
 3. Install Nvidia Container Toolkit packages:
     ```bash
-    export NVIDIA_CONTAINER_TOOLKIT_VERSION=1.17.8-1
-    sudo apt-get install -y \
-        nvidia-container-toolkit=${NVIDIA_CONTAINER_TOOLKIT_VERSION} \
-        nvidia-container-toolkit-base=${NVIDIA_CONTAINER_TOOLKIT_VERSION} \
-        libnvidia-container-tools=${NVIDIA_CONTAINER_TOOLKIT_VERSION} \
-        libnvidia-container1=${NVIDIA_CONTAINER_TOOLKIT_VERSION}
+    sudo apt install -y nvidia-container-toolkit
+    ```
+
+4. Restart the Docker daemon:
+    ```bash
+    sudo systemctl restart docker
     ```
 
 ### Create a Network
@@ -373,60 +413,262 @@ We'll call this network `app-net`: you can call it anything you like, just be su
 Run the following:
 
 ```bash
-sudo docker network create app-net
+docker network create app-net
 ```
 
 That's it! Now, when we create containers, we can reference it as follows:
 
 **Docker Run**
 ```bash
-sudo docker run <container> --network app-net
+docker run <container> --network app-net
 ```
 
 **Docker Compose**
 ```yaml
 services:
-    <container>:
-        # add this
-        networks:
-        - app-net
+  <container>:
+    # add this
+    networks:
+      - app-net
 
 # add this
 networks:
-    app-net:
-        external: true
+  app-net:
+    external: true
 ```
 
 > Replace `<container>` with the actual service - don't forget to add other parameters too.
 
-With this configured, we can now call containers by name and port. Let's pretend we're calling the /health endpoint in `llama-swap` from `open-webui` (two actual containers we'll be creating later on) to ensure that the containers can see and speak to each other. Run (`CTRL+C` to quit):
+With this configured, we can now call containers by name and port. Let's pretend we're calling the `/health` endpoint in `llama-swap` from `open-webui` (two actual containers we'll be creating later on) to ensure that the containers can see and speak to each other. Run (`CTRL+C` to quit):
 
 ```bash
-sudo docker exec -i open-webui curl http://llama-swap:8080/health
+docker exec -i open-webui curl http://llama-swap:8080/health
 ```
 
 You could also run it the other way to be extra sure:
 
 ```bash
-sudo docker exec -it llama-swap curl http://open-webui:8080
+docker exec -it llama-swap curl http://open-webui:8080
 ```
 
 > [!IMPORTANT]
 > The port is always the **internal port** the container is running on. If a container runs on 1111:8080, for example, 1111 is the port on the host (where you might access it, like `http://localhost:1111` or `http://<server_ip>:1111`) and 8080 is the internal port the container is running on. Thus, trying to access the container on 1111 via `app-net` will not work. Remembering this when specifying URLs in services will save you a lot of unnecessary "why isn't this working?" pains.
 
+### Harden Docker Containers
+
+To "harden" something in software terms is to make it more secure and more resilient to cyberattacks. Usually, this involves reducing the surface area by which an attacker can gain access to the system but it also includes mitigating what an attacker can do assuming they have successfully gotten access. Essentially, we will set up both prevention and cure - although, as they say, an ounce of prevention is better than a pound of cure. This sub-section leverages knowledge from [this Reddit comment](https://www.reddit.com/r/selfhosted/comments/1pr74r4/comment/nv07sp4/), courtesy of [u/arnedam](https://www.reddit.com/user/arnedam/). Another good reference is the [OWASP Docker Security Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Docker_Security_Cheat_Sheet.html).
+
+To a large extent, the security objectives we're aiming towards can be achieved by applying the [Principle of Least Privilege (PoLP)](https://en.wikipedia.org/wiki/Principle_of_least_privilege) - in other words, giving our containers exactly and **only** what they need to perform their function. For each guideline, I've provided an existing risk and a mitigation strategy (along with how it fixes the problem); while not strictly necessary, learning *how* things are at risk is beneficial to start thinking securely about the services you host.
+
+> [!NOTE]
+> This sub-section is **critical** for public-facing services. However, even if you only intend to access your services via a private network (**preferred if possible**), doing this is quite literally never a bad idea because it limits how much damage can be done to your server and its services if it ever was to become compromised somehow.
+
+1. Run the service under your user, not root:
+    ```yaml
+    user: "<your_user_id>:<your_group_id>"
+    ```
+    To find `<your_user_id>`, run `id -u`. To find `<your_group_id>`, run `id -g`.
+
+    **RISK**: Unless specified otherwise, containers run under the root user. Compromised containers running under root can do all sorts of damage, ranging anywhere from executing malicious code to prying on/deleting system files.
+
+    **MITIGATION**: By specifying a user that the container runs under, the container's privilege is limited to the user's privilege, which is almost definitively lower than the root user's privilege to modify the system.
+
+2. Make the file system read-only:
+    ```yaml
+    read_only: true
+    ```
+
+    **RISK**: By default, containers are allowed to read and write the files they have access to. This means an attacker who has successfully compromised your container could write bogus files/malicious code and spy on/delete critical information.
+    
+    **MITIGATION**: Adding this will prevent attackers from being able to write malicious code files or delete important data from your system that are accessible to the container.
+
+> [!WARNING]
+> Apply the `read_only: true` directive with care: if your service leverages file writes, like the many services that write to `/tmp`, those subprocesses will fail. If those subprocesses are critical, you may even see the container fail to start. Expect this **not** to work in an all-encompassing way for all containers - you will most likely need to surgically apply the `:ro` directive to volume mounts in most places.
+
+3. Limit the physical resources your container can access:
+    ```yaml
+    # maximum number of processes the container can execute
+    pids_limit: 512
+    # maximium memory for the container
+    mem_limit: 3g
+    # maximum number of CPU cores the container can utilize - can be fractional
+    cpus: 3
+    ```
+
+    **RISK**: Containers are, by default, given unrestricted physical resource allocation capabilities. This means that if a container was to be compromised, it would be able to allocate as much of your CPU clock cycles, RAM capacity, and VRAM capacity to executing malicious code.
+
+    **MITIGATION**: Allocating fixed limits to resources will prevent attackers from using the entirety of your server's physical resources to do damage if your container was to be compromised, e.g. running a botnet via your machine.
+
+    **Docker Swarm**
+
+    If you're using Docker Swarm (not used in this guide), you need to format it slightly differently:
+
+    ```yaml
+    deploy:
+      resources:
+        limits:
+          pids: 512
+          memory: 3g
+          cpus: 3
+    ```
+
+4. Disable `tty` and `stdin` in the container:
+    ```yaml
+    tty: false
+    stdin_open: false
+    ```
+
+    **RISK**: `stdin` gives the container the ability for commands to be written to it (input injection) and `tty` gives the container an active shell environment - together, they grant the container complete interactive shell capability such that potentially malicious commands can be run from it.
+
+    **MITIGATION**: Disabling these will prevent attackers from being able to execute code via the containers, severely minimizing [arbitrary code execution](https://en.wikipedia.org/wiki/Arbitrary_code_execution) (ACE) vulnerabilities.
+
+5. Disallow the container from elevating its own privileges:
+    ```yaml
+    security_opt:
+      - "no-new-privileges=true"
+    ```
+
+    **RISK**: Containers are able to elevate their own access given an interactive shell environment. This could even override the `user` directive provided earlier, giving root-level access to the system via the container.
+
+    **MITIGATION**: Adding this line will prevent attackers from being able to override the `user` directive we provided earlier and stop them from being able to grant the now-compromised container root-level permissions.
+
+6. Drop default container capabilities:
+    ```yaml
+    cap_drop:
+      - ALL
+    ```
+
+    **RISK**: Containers are given a lot of permissions by default. Most of these permissions are not required by most containers. Giving extra access increases the attack vector surface area in case a container was to become compromised - especially since these capabilities can impact the host kernel.
+
+    **MITIGATION**: Adding this will drop the widely-permissive default permissions granted to containers. This ensures that we only give containers the system capabilities to do the things they are required to do.
+
+    `cap_drop` with a value of `ALL` can be too aggressive for containers that require multiple capabilities. In this case, right after the above block, consider reviewing the following commonly-used capabilities. They are **not all required and should not all be added** - they are just a starting point for some capabilities sometimes required by containers.
+    ```yaml
+    cap_add:
+      # LOWER RISK
+      # Make arbitrary changes to file UIDs and GIDs (see chown(2))
+      - CHOWN
+      # Make arbitrary manipulations of process GIDs and supplementary GID list
+      - SETGID
+      # Make arbitrary manipulations of process UIDs
+      - SETUID
+      # Bind a socket to internet domain privileged ports (port numbers less than 1024)
+      - NET_BIND_SERVICE
+
+      # HIGHER RISK - CAN AFFECT IMPORTANT SYSTEM-LEVEL CONFIGURATIONS
+      # Perform various network-related operations
+      - NET_ADMIN
+      # Use RAW and PACKET sockets
+      - NET_RAW
+      # Perform a range of system administration operations
+      - SYS_ADMIN
+    ```
+
+    This will, in order, drop all capabilities and then surgically re-add the ones that are required for the functionality the container achieves. A complete list of capabilities can be found [here](https://docs.docker.com/engine/containers/run/#runtime-privilege-and-linux-capabilities).
+    
+    Containers with inadequate capabilities will fail to run. If you drop one that is required, you could:
+    1. Ideally, take a look at the list of capabilities referenced above, and perform some trial-and-error addition of capabilities. LLMs can help greatly with this endeavor, especially when equipped with tools that can make them capable of reading documentation or the source code of the service you're looking to run. You can skip this directive until you have everything configured and come back to it later.
+    2. Less ideally, give up and remove the `cap_drop` directive entirely. I wouldn't recommend it but, with private services, this is hardly the most insecure setup in the world if you do everything else.
+
+7. Prevent excessive logging:
+    ```yaml
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "10"
+        max-size: "20m"
+    ```
+
+    **RISK**: Much like a [zip bomb](https://en.wikipedia.org/wiki/Zip_bomb), a logging bomb can recursively clutter and eventually render the system unusable by overwhelming the system with an ever-increasing number of large log files.
+
+    **MITIGATION**: By capping the maximum number of files (10) and sizes of the individual files (20MB), we can limit the effectiveness of an attack like this. 
+
+    Feel free to change the limits (reasonably) as you wish if you run into issues.
+
+8. Limit the temporary file directory's privileges:
+    ```yaml
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=512m
+    ```
+
+    **RISK**: If allowed to download files, compromised containers could both install malicious files to the filesystem and execute them.
+
+    **MITIGATION**: Setting up a temporary file area with very limited permissions stops this potential attack vector. Containers are limited to downloading files here, in a little sandbox with a fixed small size and without script execution privileges.
+
+9. Mount read-only volumes:
+    ```yaml
+    volumes:
+      - /path/to/mount1:/mount1:ro
+      - /path/to/mount2:/mount2:ro
+    ```
+
+    **RISK**: To access the file system of the host, Docker containers need directories "mounted" as volumes. This lets them read and write from the host as if the container was the host itself. Allowing write access to every mount is usually not necessary and can allow a compromised container to delete or overwrite important information in a cyber-attack.
+
+    **MITIGATION**: Mounting volumes as read-only, wherever possible, eliminates the container's ability to destroy the data in those volumes via writes. This wouldn't prevent spyware, but it would limit data from being lost in an attack.
+
+    > Replace `/path/to/mount1` and `/path/to/mount2` with actual directory paths.
+
+> [!IMPORTANT]
+> For containers where free allocation of CPU cores and memory is crucial - llama-swap, for example - you will not want to limit the maximum resources the container can access as shown in step 3.
+
+Here's a combined chunk to copy + paste into your existing services' Compose files:
+
+```yaml
+services:
+  <service_name>:
+    # 1
+    user: "<your_user_id>:<your_group_id>"
+    # 2 - Uncomment only if the container does not write
+    # read_only: true
+    # 3
+    pids_limit: 512
+    mem_limit: 3g
+    cpus: 3
+    # 4
+    tty: false
+    stdin_open: false
+    # 5
+    security_opt:
+      - "no-new-privileges=true"
+    # 6
+    cap_drop:
+      - ALL
+    # Add cap_add section if required
+    # 7
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "10"
+        max-size: "20m"
+    # 8
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=512m
+    # 9
+    volumes:
+      - /path/to/mount1:/mount1:ro
+      - /path/to/mount2:/mount2:ro
+```
+
 ### Helpful Commands
 
 In the process of setting up this server (or anywhere down the rabbit hole of setting up services), you're likely to use Docker often. For the uninitiated, here are helpful commands that will make navigating and troubleshooting containers easier:
 
-- See available/running containers: `sudo docker ps -a`
-- Restart a container: `sudo docker restart <container_name>`
-- View a container's logs (live): `sudo docker logs -f <container_name>` (`CTRL+C` to quit)
-- Rename a container: `sudo docker rename <container_name> <new_container_name>`
-- Sometimes, a single service will spin up multiple containers, e.g. `xyz-server` and `xyz-db`. To restart both simultaneously, run the following command **from inside the directory containing the Compose file**: `sudo docker compose restart`
+- See available/running containers: `docker ps -a`
+- Restart a container: `docker restart <container_name>`
+- View a container's logs (live): `docker logs -f <container_name>` (`CTRL+C` to quit)
+- Rename a container: `docker rename <container_name> <new_container_name>`
+- Sometimes, a single service will spin up multiple containers, e.g. `xyz-server` and `xyz-db`. To restart both simultaneously, run the following command **from inside the directory containing the Compose file**: `docker compose restart`
+- Recreate a service: `docker compose down && docker compose up -d`
+- Test a container's configuration: `docker compose config --quiet`
+- View a container's resolved configuration: `docker compose config`
+- List Docker networks: `docker network ls`
 
 > [!TIP]
-> There's no rules when it comes to how you set up your Docker containers/services. However, here are my two cents:  
-> It's cleanest to use Docker Compose (`sudo docker compose up -d` with a `docker-compose.yaml` file as opposed to `sudo docker run -d <image_name>`). Unless you take copious notes on your homelab and its setup, this method is almost self-documenting and keeps a neat trail of the services you run via their compose files. One compose file per directory is standard.
+> There are no set rules when it comes to how you set up your Docker containers/services. However, here are my two cents:  
+> It's cleanest to use Docker Compose (`docker compose up -d` with a `docker-compose.yaml` file as opposed to `docker run -d <image_name>`). Unless you take copious notes on your homelab and its setup, this method is almost self-documenting and keeps a neat trail of the services you run via their compose files. One compose file per directory is standard.
+
+> [!TIP]
+> Occasionally, restarting a container is not enough to persist changes to configurations. If ever you find that changes you made to a service are not showing up, recreate the service altogether first before continuing to other troubleshooting.
 
 ## HuggingFace CLI
 
@@ -504,9 +746,9 @@ To power our search-based workflows, we don't want to rely on a search provider 
 
 1. Start the container:
     ```bash
-    sudo docker pull searxng/searxng
+    docker pull searxng/searxng
     export PORT=5050
-    sudo docker run \
+    docker run \
         -d -p ${PORT}:8080 \
         --name searxng \
         --network app-net \
@@ -531,7 +773,7 @@ To power our search-based workflows, we don't want to rely on a search provider 
             - json      # add this line
     ```
 
-3. Restart the container with `sudo docker restart searxng`
+3. Restart the container with `docker restart searxng`
 
 ### Open WebUI Integration
 
@@ -645,7 +887,7 @@ vLLM comes with its own OpenAI-compatible API that we can use just like Ollama. 
 
 - Run:
     ```
-    sudo docker run --gpus all \
+    docker run --gpus all \
     -v ~/.cache/huggingface:/root/.cache/huggingface \
     --env "HUGGING_FACE_HUB_TOKEN=<your_hf_hub_token>" \
     -p 8556:8000 \
@@ -659,18 +901,18 @@ To serve a different model:
 
 - First stop the existing container:
     ```
-    sudo docker ps -a
-    sudo docker stop <vllm_container_ID>
+    docker ps -a
+    docker stop <vllm_container_ID>
     ```
 
 - If you want to run the exact same setup again in the future, skip this step. Otherwise, run the following to delete the container and not clutter your Docker container environment:
     ```
-    sudo docker rm <vllm_container_ID>
+    docker rm <vllm_container_ID>
     ```
 
 - Rerun the Docker command from the installation with the desired model.
     ```
-    sudo docker run --gpus all \
+    docker run --gpus all \
     -v ~/.cache/huggingface:/root/.cache/huggingface \
     --env "HUGGING_FACE_HUB_TOKEN=<your_hf_hub_token>" \
     -p 8556:8000 \
@@ -801,7 +1043,7 @@ In the installation below, we'll use `Qwen3-4B-Instruct-2507-UD-Q4_K_XL.gguf` fo
 
     **llama.cpp**
     ```bash
-    sudo docker run -d --gpus all --restart unless-stopped --network app-net --pull=always --name llama-swap -p 9292:8080 \
+    docker run -d --gpus all --restart unless-stopped --network app-net --pull=always --name llama-swap -p 9292:8080 \
     -v /path/to/models:/models \
     -v /home/<your_username>/llama-swap/config.yaml:/app/config.yaml \
     -v /home/<your_username>/llama.cpp/build/bin/llama-server:/app/llama-server \
@@ -810,7 +1052,7 @@ In the installation below, we'll use `Qwen3-4B-Instruct-2507-UD-Q4_K_XL.gguf` fo
 
     **vLLM (Docker/local)**
     ```bash
-    sudo docker run -d --gpus all --restart unless-stopped --network app-net --pull=always --name llama-swap -p 9292:8080 \
+    docker run -d --gpus all --restart unless-stopped --network app-net --pull=always --name llama-swap -p 9292:8080 \
     -v /path/to/models:/models \
     -v /home/<your_username>/vllm:/app/vllm \
     -v /home/<your_username>/llama-swap/config.yaml:/app/config.yaml \
@@ -930,12 +1172,12 @@ Open WebUI is a web-based interface for managing models and chats, and provides 
 
 To install without Nvidia GPU support, run the following command:
 ```bash
-sudo docker run -d -p 3000:8080 --network app-net --add-host=host.docker.internal:host-gateway -v open-webui:/app/backend/data --name open-webui --restart always ghcr.io/open-webui/open-webui:main
+docker run -d -p 3000:8080 --network app-net --add-host=host.docker.internal:host-gateway -v open-webui:/app/backend/data --name open-webui --restart always ghcr.io/open-webui/open-webui:main
 ```
 
 For Nvidia GPUs, run the following command:
 ```bash
-sudo docker run -d -p 3000:8080 --network app-net --gpus all --add-host=host.docker.internal:host-gateway -v open-webui:/app/backend/data --name open-webui --restart always ghcr.io/open-webui/open-webui:cuda
+docker run -d -p 3000:8080 --network app-net --gpus all --add-host=host.docker.internal:host-gateway -v open-webui:/app/backend/data --name open-webui --restart always ghcr.io/open-webui/open-webui:cuda
 ```
 
 You can access it by navigating to `http://localhost:3000` in your browser or `http://<server_ip>:3000` from another device on the same network. There's no need to add this to the `init.bash` script as Open WebUI will start automatically at boot via Docker Engine.
@@ -1041,9 +1283,9 @@ mcp-proxy is a server proxy that allows switching between transports (stdio to s
     ENTRYPOINT ["catatonit", "--", "mcp-proxy"]
     ```
 
-5. Start the container with `sudo docker compose up -d`
+5. Start the container with `docker compose up -d`
 
-Your mcp-proxy container should be up and running! Adding servers is simple: add the relevant server to `servers.json` (you can use the same configuration that the MCP server's developer provides for VS Code, it's identical) and then restart the container with `sudo docker restart mcp-proxy`.
+Your mcp-proxy container should be up and running! Adding servers is simple: add the relevant server to `servers.json` (you can use the same configuration that the MCP server's developer provides for VS Code, it's identical) and then restart the container with `docker restart mcp-proxy`.
 
 ### MCPJungle
 
@@ -1116,7 +1358,7 @@ MCPJungle is another MCP proxy server with a different focus. It focuses on prov
         external: true
     ```
 
-2. Start the container with `sudo docker compose up -d`
+2. Start the container with `docker compose up -d`
 
 3. Create a tool file:
     ```bash
@@ -1135,7 +1377,7 @@ MCPJungle is another MCP proxy server with a different focus. It focuses on prov
 
 4. Register the tool:
     ```bash
-    sudo docker exec -i mcpjungle-server /mcpjungle register -c /host/project/fetch.json
+    docker exec -i mcpjungle-server /mcpjungle register -c /host/project/fetch.json
     ```
 
 Repeat steps 3 and 4 for every tool mentioned. Commands for `sequential-thinking` and `searxng` can be found below.
@@ -1238,7 +1480,7 @@ To install Kokoro-FastAPI, run
 ```bash
 git clone https://github.com/remsky/Kokoro-FastAPI.git
 cd Kokoro-FastAPI
-sudo docker compose up --build
+docker compose up --build
 ```
 
 The server can be used in two ways: an API and a UI. By default, the API is served on port 8880 and the UI is served on port 7860.
@@ -1496,8 +1738,8 @@ For a Docker installation, you're good to go when you re-run your Docker command
 
 Delete the current container:
 ```bash
-sudo docker stop llama-swap
-sudo docker rm llama-swap
+docker stop llama-swap
+docker rm llama-swap
 ```
 
 Re-run the container command from the [llama-swap section](#llama-swap).
@@ -1519,9 +1761,9 @@ docker run -d --name watchtower --volume /var/run/docker.sock:/var/run/docker.so
 Navigate to the directory and pull the latest container image:
 ```bash
 cd mcp-proxy # or mcpjungle
-sudo docker compose down
-sudo docker compose pull
-sudo docker compose up -d
+docker compose down
+docker compose pull
+docker compose up -d
 ```
 
 ### Kokoro FastAPI
@@ -1529,8 +1771,8 @@ sudo docker compose up -d
 Navigate to the directory and pull the latest container image:
 ```
 cd Kokoro-FastAPI
-sudo docker compose pull
-sudo docker compose up -d
+docker compose pull
+docker compose up -d
 ```
 
 ### ComfyUI
@@ -1545,7 +1787,28 @@ pip install -r requirements.txt
 
 ## Troubleshooting
 
-For any service running in a container, you can check the logs by running `sudo docker logs -f (container_ID)`. If you're having trouble with a service, this is a good place to start.
+### Docker
+
+- Since we aim to use our user instead of root to run services, you may encounter permissions issues when trying to mount a volume that is not technically owned by our user. To fix this, you can do one of two things:
+  - Change the ownership of the directory:
+    ```bash
+    sudo chown -R $(id -u):$(id -g) /path/to/volume
+    ```
+
+  - Grant access to our user with access control lists (ACLs, in short):
+    ```bash
+    # Grant read/write to specific user
+    sudo setfacl -R -m u:$(id -u):rw /path/to/volume
+
+    # Grant to group
+    sudo setfacl -R -m g:$(id -g):rw /path/to/volume
+    ```
+
+    In case you don't have the `acl` package, install with `sudo apt update && sudo apt install acl`. The official package page can be found [here](https://packages.debian.org/bookworm/acl).
+
+    > Replace `/path/to/volume` with the desired path.
+
+    I like ACLs better - it solves the access issue cleanly without changing ownership unnecessarily and, in my experience, tends to break things less. However, if the resource is clearly meant to be owned by a specific user, changing ownership is preferred purely for separation of concerns. Gauge for yourself, both are completely acceptable options. Avoid changing permissions if your container is already up and running, though.
 
 ### `ssh`
 - If you encounter an issue using `ssh-copy-id` to set up passwordless SSH, try running `ssh-keygen -t rsa` on the client before running `ssh-copy-id`. This generates the RSA key pair that `ssh-copy-id` needs to copy to the server.
@@ -1603,7 +1866,7 @@ This is my first foray into setting up a server and ever working with Linux so t
 - I chose Debian because it is, apparently, one of the most stable Linux distros. I also went with an XFCE desktop environment because it is lightweight and I wasn't yet comfortable going full command line.
 - Use a user for auto-login, don't log in as root unless for a specific reason.
 - To switch to root in the command line without switching users, run `sudo -i`.
-- If something using a Docker container doesn't work, try running `sudo docker ps -a` to see if the container is running. If it isn't, try running `sudo docker compose up -d` again. If it is and isn't working, try running `sudo docker restart <container_id>` to restart the container.
+- If something using a Docker container doesn't work, try running `docker ps -a` to see if the container is running. If it isn't, try running `docker compose up -d` again. If it is and isn't working, try running `docker restart <container_id>` to restart the container.
 - If something isn't working no matter what you do, try rebooting the server. It's a common solution to many problems. Try this before spending hours troubleshooting. Sigh.
 - While it takes some time to get comfortable with, using an inference engine like llama.cpp and vLLM (as compared to Ollama) is really the way to go to squeeze the maximum performance out of your hardware. If you're reading this guide in the first place and haven't already thrown up your hands and used a cloud provider, it's a safe assumption that you care about the ethos of hosting all this stuff locally. Thus, get your experience as close to a cloud provider as it can be by optimizing your server.
 
@@ -1664,7 +1927,7 @@ Docs:
 
 ## Acknowledgements
 
-Cheers to all the fantastic work done by the open-source community. This guide wouldn't exist without the effort of the many contributors to the projects and guides referenced here. To stay up-to-date on the latest developments in the field of machine learning, LLMs, and other vision/speech models, check out [r/LocalLLaMA](https://www.reddit.com/r/LocalLLaMA/).
+Cheers to all the fantastic work done by the open-source community. This guide wouldn't exist without the effort of the many contributors to the projects and guides referenced here. To stay up-to-date on the latest developments in the field of machine learning, LLMs, and other vision/speech models, check out [r/LocalLLaMA](https://www.reddit.com/r/LocalLLaMA/). To stay in touch with (or fall down the rabbit hole of) the world of self-hosted apps out there for your new server, check out [r/selfhosted](https://www.reddit.com/r/selfhosted).
 
 > [!NOTE]
 > Please star any projects you find useful and consider contributing to them if you can. Stars on this guide would also be appreciated if you found it helpful, as it helps others find it too. 
