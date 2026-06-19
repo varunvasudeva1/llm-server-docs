@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/varunvasudeva1-llm-server-docs-badge.png)](https://mseep.ai/app/varunvasudeva1-llm-server-docs)
+
 # Local LLaMA Server Setup Documentation
 
 _TL;DR_: End-to-end documentation to set up your own local & fully private LLM server on Debian. Equipped with chat, web search, RAG, model management, MCP servers, image generation, and TTS, along with steps for configuring SSH, firewall, and secure remote access via Tailscale.
