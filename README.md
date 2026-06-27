@@ -211,7 +211,7 @@ Now, we'll install the required GPU drivers that allow programs to utilize their
 
 We'll also install some packages that are not installed on Debian by default but may be required later:
 ```
-sudo apt install libcurl cmake
+sudo apt install libcurl cmake build-essential
 ```
 
 ### Schedule Startup Script
