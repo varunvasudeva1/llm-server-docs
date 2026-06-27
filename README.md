@@ -137,7 +137,7 @@ For reference, this guide was built around the following system:
 > **CPU-only**: You can skip the GPU driver installation and power limiting steps. The rest of the guide should work as expected.
 
 > [!NOTE]
-> This guide uses `~/` (or `/home/<your_username>`) as the base directory. If you're working in different directory, please modify all your commands accordingly.
+> This guide uses `~/` (or `/home/<username>`) as the base directory. If you're working in different directory, please modify all your commands accordingly.
 
 To begin the process of setting up your server, you will need the following:
 
@@ -979,7 +979,8 @@ While the above steps will help you get up and running with an OpenAI-compatible
 ### llama-swap
 
 🌟 [**GitHub**](https://github.com/mostlygeek/llama-swap)  
-📖 [**Documentation**](https://github.com/mostlygeek/llama-swap/wiki)
+📖 [**Documentation**](https://github.com/mostlygeek/llama-swap/wiki)  
+📖 [**Configuration**](https://github.com/mostlygeek/llama-swap/wiki/Configuration)
 
 > [!TIP]
 > This is my recommended way to run llama.cpp/vLLM models.
@@ -1003,10 +1004,9 @@ In the installation below, we'll use `Qwen3-4B-Instruct-2507-UD-Q4_K_XL.gguf` fo
         "qwen3-4b":
             proxy: "http://127.0.0.1:7000"
             cmd: |
-            /app/llama-server
-            -m /models/Qwen3-4B-Instruct-2507-UD-Q4_K_XL.gguf
-            # or use `-hf unsloth/Qwen3-4B-Instruct-2507-GGUF:Q4_K_XL` for HuggingFace
-            --port 7000
+                /app/llama-server
+                -m /models/Qwen3-4B-Instruct-2507-UD-Q4_K_XL.gguf
+                --port 7000 --host 0.0.0.0
     ```
 
     **vLLM (Docker)**
@@ -1015,11 +1015,10 @@ In the installation below, we'll use `Qwen3-4B-Instruct-2507-UD-Q4_K_XL.gguf` fo
         "qwen3-4b":
             proxy: "http://127.0.0.1:7000"
             cmd: |
-            docker run --name qwen-vllm
-            --init --rm -p 7000:8080
-            --ipc=host \
-            vllm/vllm-openai:latest
-            -m /models/Qwen/Qwen3-4B-Instruct-2507
+                docker run --name qwen-vllm
+                --init --rm -p 7000:8080 --ipc=host
+                vllm/vllm-openai:latest
+                -m /models/Qwen/Qwen3-4B-Instruct-2507
             cmdStop: docker stop qwen-vllm
     ```
 
@@ -1029,11 +1028,10 @@ In the installation below, we'll use `Qwen3-4B-Instruct-2507-UD-Q4_K_XL.gguf` fo
         "qwen3-4b":
             proxy: "http://127.0.0.1:7000"
             cmd: |
-            source /app/vllm/.venv/bin/activate && \
-            /app/vllm/.venv/bin/vllm serve \
-            --port 7000 \
-            --host 0.0.0.0 \
-            -m /models/Qwen/Qwen3-4B-Instruct-2507
+                source /app/vllm/.venv/bin/activate &&
+                /app/vllm/.venv/bin/vllm serve
+                -m /models/Qwen/Qwen3-4B-Instruct-2507
+                --port 7000 --host 0.0.0.0
             cmdStop: pkill -f "vllm serve"
     ```
 
@@ -1045,8 +1043,8 @@ In the installation below, we'll use `Qwen3-4B-Instruct-2507-UD-Q4_K_XL.gguf` fo
     ```bash
     docker run -d --gpus all --restart unless-stopped --network app-net --pull=always --name llama-swap -p 9292:8080 \
     -v /path/to/models:/models \
-    -v /home/<your_username>/llama-swap/config.yaml:/app/config.yaml \
-    -v /home/<your_username>/llama.cpp/build/bin/llama-server:/app/llama-server \
+    -v /home/<username>/llama-swap/config.yaml:/app/config.yaml \
+    -v /home/<username>/llama.cpp/build/bin/llama-server:/app/llama-server \
     ghcr.io/mostlygeek/llama-swap:cuda
     ```
 
@@ -1054,54 +1052,115 @@ In the installation below, we'll use `Qwen3-4B-Instruct-2507-UD-Q4_K_XL.gguf` fo
     ```bash
     docker run -d --gpus all --restart unless-stopped --network app-net --pull=always --name llama-swap -p 9292:8080 \
     -v /path/to/models:/models \
-    -v /home/<your_username>/vllm:/app/vllm \
-    -v /home/<your_username>/llama-swap/config.yaml:/app/config.yaml \
+    -v /home/<username>/vllm:/app/vllm \
+    -v /home/<username>/llama-swap/config.yaml:/app/config.yaml \
     ghcr.io/mostlygeek/llama-swap:cuda
     ```
 
-    > Replace <your_username> with your actual username and `/path/to/models` with the path to your model files.
+    > Replace `<username>` with your actual username and `/path/to/models` with the path to your model files.
 
 > [!NOTE]
 > llama-swap prefers Docker-based vLLM due to cleanliness of environments and adherence to SIGTERM signals sent by the server. I've written out both options here.
 
-This should result in a functioning llama-swap instance running at `http://localhost:9292`, which can be confirmed by running `curl http://localhost:9292/health`. It is **highly recommended** that you read the [configuration documentation](https://github.com/mostlygeek/llama-swap/wiki/Configuration). llama-swap is thoroughly documented and highly configurable - utilizing its capabilities will result in a tailored setup ready to deploy as you need it.
+This should result in a functioning llama-swap instance running at `http://localhost:9292`, which can be confirmed by running `curl http://localhost:9292/health`. It is **highly recommended** that you read the configuration documentation. llama-swap is thoroughly documented and highly configurable - utilizing its capabilities will result in a tailored setup ready to deploy as you need it.
 
 ### `systemd` Service
 
-The other way to persist a model across system reboots is to start the inference engine in a `.service` file that will run alongside the Linux operating system when booting, ensuring that it is available whenever the server is on. If you're willing to live with the relative compromise of not being able to swap models/backends and are satisfied with running one model, this is the lowest overhead solution and works great.
+📖 [**llama.cpp Server Documentation**](https://github.com/ggml-org/llama.cpp/tree/master/tools/server)  
+📖 [**llama.cpp Preset Documentation**](https://github.com/ggml-org/llama.cpp/blob/master/docs/preset.md)  
+📖 [**vLLM Online Serving Documentation**](https://docs.vllm.ai/en/stable/serving/online_serving.html)
+
+The other way to persist a model across system reboots is to start the inference engine in a `.service` file that will run alongside the Linux operating system when booting, ensuring that it is available whenever the server is on.
+
+llama.cpp can now natively allow for model-switching via its `--models-preset` flag. Compared to llama-swap, llama.cpp's in-built switcher naturally has less overhead because it's bundled with the binary but it also doesn't come with a UI where one can switch models, view activity & logs, monitor system performance during inference, etc. llama.cpp and llama-swap are functionally equivalent with respect to model-switching. For vLLM, if you're willing to live with the relative compromise of not being able to swap models/backends and are satisfied with running one model, `systemd` is the lowest overhead solution and works great.
 
 Let's call the service we're about to build `llm-server.service`. We'll assume all models are in the `models` child directory - you can change this as you need to.
 
-1. Create the `systemd` service file:
-    ```bash
-    sudo nano /etc/systemd/system/llm-server.service
+Create the `systemd` service file:
+```bash
+sudo nano /etc/systemd/system/llm-server.service
+```
+
+**llama.cpp**
+
+1. Create the `models.ini` file (in your llama.cpp directory):
+    ```ini
+    version = 1
+
+    [*]
+    jinja = true
+    no-mmap = true
+    no-warmup = true
+    flash-attn = true
+
+    [qwen3.6-27b]
+    model = models/Qwen3.6-27B/Qwen_Qwen3.6-27B-Q8_0.gguf
+    mmproj = models/Qwen3.6-27B/mmproj-BF16.gguf
+    ctx-size = 180000
+    parallel = 1
+    context-shift = true
+    fit = off
+    tensor-split = 12,11
+    spec-type = draft-mtp
+    spec-draft-n-max = 2
+    temp = 0.6
+    min-p = 0.0
+    top-p = 0.95
+    top-k = 20
+    presence-penalty = 0.0
+    repeat-penalty = 1.0
+    chat-template-kwargs = {"preserve_thinking": true}
+
+    [gemma-4-31b]
+    model = models/Gemma4-31B/gemma-4-31B-it-qat-UD-Q4_K_XL.gguf
+    mmproj = models/Gemma4-31B/mmproj-BF16.gguf
+    model-draft = models/Gemma4-31B/gemma-4-31b-it-qat-q4_0-assistant.gguf
+    ctx-size = 130000
+    main-gpu = 0
+    n-gpu-layers = 99
+    parallel = 1
+    fit = on
+    spec-type = draft-mtp
+    spec-draft-n-max = 2
+    chat-template-kwargs = {"preserve_thinking": true}
+    temp = 1.0
+    min-p = 0.0
+    top-p = 0.95
+    top-k = 64
+    cache-ram = 2048
+    ctx-checkpoints = 2
+    image-min-tokens = 300
+    image-max-tokens = 512
     ```
 
 2. Configure the service file:
-
-    **llama.cpp**
     ```ini
     [Unit]
-    Description=LLM Server Service
+    Description=llama.cpp Server
     After=network.target
 
     [Service]
-    User=<user>
-    Group=<user>
-    WorkingDirectory=/home/<user>/llama.cpp/build/bin/
-    ExecStart=/home/<user>/llama.cpp/build/bin/llama-server \
-        --port <port> \
-        --host 0.0.0.0 \
-        -m /home/<user>/llama.cpp/models/<model> \
-        --no-webui # [other engine arguments]
-    Restart=always
-    RestartSec=10s
+    Type=simple
+    User=<username>
+    Group=<username>
+    WorkingDirectory=/home/<username>/llama.cpp
+
+    ExecStart=/home/<username>/llama.cpp/build/bin/llama-server \
+        --models-preset models.ini \
+        --port 9292 \
+        --host 0.0.0.0
+
+    # Restart policy
+    Restart=on-failure
+    RestartSec=5
 
     [Install]
     WantedBy=multi-user.target
     ```
 
-    **vLLM**
+**vLLM**
+
+1. Configure the service file:
     ```ini
     [Unit]
     Description=LLM Server Service
@@ -1111,35 +1170,39 @@ Let's call the service we're about to build `llm-server.service`. We'll assume a
     User=<user>
     Group=<user>
     WorkingDirectory=/home/<user>/vllm/
-    ExecStart=/bin/bash -c 'source .venv/bin/activate && vllm serve --port <port> --host 0.0.0.0 -m /home/<user>/vllm/models/<model>'
+    ExecStart=/bin/bash -c 'source .venv/bin/activate && vllm serve --port <port> --host 0.0.0.0 -m /home/<username>/vllm/models/<model>'
     Restart=always
     RestartSec=10s
 
     [Install]
     WantedBy=multi-user.target
     ```
-    > Replace `<user>`, `<port>`, and `<model>` with your Linux username, desired port for serving, and desired model respectively.
 
-3. Reload the `systemd` daemon:
-    ```bash
-    sudo systemctl daemon-reload
-    ```
-4. Run the service:
+> Replace `<username>`, `<port>`, and `<model>` with your Linux username, desired port for serving, and desired model respectively.
 
-    If `llm-server.service` doesn't exist:
+Reload the `systemd` daemon:
+```bash
+sudo systemctl daemon-reload
+```
+Run the service:
+
+- If `llm-server.service` doesn't exist:
+
     ```bash
     sudo systemctl enable llm-server.service
     sudo systemctl start llm-server
     ```
 
-    If `llm-server.service` does exist:
+- If `llm-server.service` does exist:
+
     ```bash
     sudo systemctl restart llm-server
     ```
-5. (Optional) Check the service's status:
-    ```bash
-    sudo systemctl status llm-server
-    ```
+
+(Optional) Check the service's status:
+```bash
+sudo systemctl status llm-server
+```
 
 ### Open WebUI Integration
 
@@ -1160,6 +1223,9 @@ Follow the same steps as above.
 - API Key: `anything-you-like`
 
 > Replace `<port>` with your desired port.
+
+> [!WARNING]
+> If you use the `systemd` service, ensure the port is open to the local network via `ufw`. Refer to [Firewall](#firewall).
 
 ## Chat Platform
 
@@ -1341,7 +1407,7 @@ MCPJungle is another MCP proxy server with a different focus. It focuses on prov
         volumes:
         # Mount host filesystem current directory to enable filesystem MCP server access
         - .:/host/project:ro
-        - /home/<your_username>:/host:ro
+        - /home/<username>:/host:ro
         # Other options:
         # - ${HOME}:/host/home:ro
         # - /tmp:/host/tmp:rw
