@@ -11,8 +11,11 @@ Software Stack:
 - MCP Proxy Server ([mcp-proxy](https://github.com/sparfenyuk/mcp-proxy), [MCPJungle](https://github.com/mcpjungle/MCPJungle))
 - Text-to-Speech Server ([Kokoro FastAPI](https://github.com/remsky/Kokoro-FastAPI))
 - Image Generation Server ([ComfyUI](https://github.com/comfyanonymous/ComfyUI))
+- VPN/Remote Access ([Tailscale](https://tailscale.com))
+- Reverse Proxy ([Caddy](https://github.com/caddyserver/caddy))
+- DNS Provider ([Cloudflare](https://www.cloudflare.com))
 
-![Software Stack Architectural Diagram](llm-server-architecture.png)
+![Software Stack Architectural Diagram](media/llm-server-architecture.png)
 
 ## Table of Contents
 
@@ -451,13 +454,12 @@ docker exec -it llama-swap curl http://open-webui:8080
 
 ### Harden Docker Containers
 
-📖 See the full guide: [docker-security.md](docker-security.md)
+Docker security is is **critical** for public-facing services. It involves reducing attack surfaces, eliminating terminal abilities for containers, and limiting resource usage. Even if you only intend to access your services via a private network (preferred if possible), shoring up security is never a bad idea because it limits how much damage can be done to your server and its services if it ever was to become compromised somehow.
 
-> [!NOTE]
-> This sub-section is **critical** for public-facing services. However, even if you only intend to access your services via a private network (**preferred if possible**), doing this is quite literally never a bad idea because it limits how much damage can be done to your server and its services if it ever was to become compromised somehow.
+📖 See the full guide at [Docker Security](docs/docker-security.md). 
 
 > [!TIP]
-> The combined example in [docker-security.md](docker-security.md) provides a ready-to-paste YAML block with all hardening directives. You can copy it directly into your existing Compose files and customize as needed.
+> The combined example at the end provides a ready-to-paste YAML block with all hardening directives. You can copy it directly into your existing Compose files and customize as needed.
 
 ### Helpful Commands
 
@@ -1514,9 +1516,9 @@ Refer to [this guide](https://www.digitalocean.com/community/tutorials/how-to-se
 
 ## Remote Access
 
-Remote access refers to the ability to access your server outside of your home network. For example, when you leave the house, you aren't going to be able to access `http://<your_server_ip>`, because your network has changed from your home network to some other network (either your mobile carrier's or a local network in some other place). This means that you won't be able to access the services running on your server. There are many solutions on the web that solve this problem and we'll explore some of the easiest-to-use here.
+This section covers the software required to allow secure and efficient access to the homelab environment. It involves leveraging Caddy as a reverse proxy engine, Cloudflare as a DNS provider, and Tailscale for the mesh VPN that provides built-in security due to firewall hole punching. It is highly recommended if you're looking at building a system that will be used professionally or even by family and friends.
 
-📖 See the full guide: [remote-access.md](remote-access.md)
+📖 See the full guide at [Remote Access](docs/remote-access.md).
 
 ## Updating
 

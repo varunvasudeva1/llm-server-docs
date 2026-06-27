@@ -21,6 +21,9 @@ Remote access refers to the ability to access your server outside of your home n
       - [Setting up Cloudflare](#setting-up-cloudflare)
       - [Obtaining Let's Encrypt Certificates with Caddy](#obtaining-lets-encrypt-certificates-with-caddy)
       - [Troubleshooting](#troubleshooting)
+  - [Updating](#updating)
+    - [Tailscale](#tailscale-1)
+    - [Caddy](#caddy-1)
   - [Next Steps](#next-steps)
 
 ## Prerequisites
@@ -218,7 +221,7 @@ Before Caddy can route traffic to your services, your domain's Domain Name Syste
     ```
 
 3. Install Caddy with the Cloudflare DNS module: 
-    ![Caddy Cloudflare DNS module](media/caddy-cloudflare-module.png)
+    ![Caddy Cloudflare DNS module](../media/caddy-cloudflare-module.png)
 
    1. Visit the [Caddy download page](https://caddyserver.com/download).
    2. Select your platform (Linux amd64, for this guide).
@@ -259,6 +262,23 @@ Before Caddy can route traffic to your services, your domain's Domain Name Syste
 - **Service returns a 502/504 error.** This means Caddy can reach the domain but cannot connect to the backend service. Verify the service is running on the expected port and that the IP address in the Caddyfile is correct. You can test from the Caddy host with `curl http://100.x.y.z:3000`.
 
 - **Can't access the domain from outside your network.** Ensure port 443 is forwarded on your router to your server's local IP. With DNS-01 challenges, only port 443 needs to be open (port 80 is not required). If you're unsure about port forwarding, stick to accessing services via Tailscale IPs directly.
+
+## Updating
+
+### Tailscale
+
+Rerun the installation script:
+```
+curl -fsSL https://tailscale.com/install.sh | sh
+```
+
+### Caddy
+
+Update and reinstall the package:
+```
+sudo apt update
+sudo apt install --only-upgrade caddy
+```
 
 ## Next Steps
 
