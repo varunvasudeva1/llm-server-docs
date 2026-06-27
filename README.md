@@ -78,13 +78,10 @@ Software Stack:
   - [Updating](#updating)
     - [General](#general-1)
     - [Nvidia Drivers \& CUDA](#nvidia-drivers--cuda)
+    - [Docker Services](#docker-services)
     - [Ollama](#ollama-1)
     - [llama.cpp](#llamacpp-1)
     - [vLLM](#vllm-1)
-    - [llama-swap](#llama-swap-2)
-    - [Open WebUI](#open-webui-1)
-    - [mcp-proxy/MCPJungle](#mcp-proxymcpjungle)
-    - [Kokoro FastAPI](#kokoro-fastapi-1)
     - [ComfyUI](#comfyui-1)
   - [Troubleshooting](#troubleshooting)
     - [Docker](#docker-1)
@@ -92,7 +89,7 @@ Software Stack:
     - [Nvidia Drivers](#nvidia-drivers)
     - [Ollama](#ollama-2)
     - [vLLM](#vllm-2)
-    - [Open WebUI](#open-webui-2)
+    - [Open WebUI](#open-webui-1)
   - [Monitoring](#monitoring)
   - [Notes](#notes)
     - [Software](#software)
@@ -1541,6 +1538,43 @@ Follow Nvidia's guide [here](https://developer.nvidia.com/cuda-downloads?target_
 > [!WARNING]
 > Don't skip this step. Not installing the latest drivers after upgrading Debian packages will throw your installations out of sync, leading to broken functionality. When updating, target everything important at once. Also, rebooting after this step is a good idea to ensure that your system is operating as expected after upgrading these crucial drivers.
 
+### Docker Services
+
+Most services in this guide run via Docker and can be updated using the same general pattern. Navigate to the directory containing the service's compose file or container and use the appropriate commands below.
+
+**Docker Compose services**:
+
+```bash
+cd <service-directory>
+docker compose down
+docker compose pull
+docker compose up -d
+```
+
+> Replace `<service-directory>` with the directory containing the `docker-compose.yaml` file (e.g., `mcp-proxy`, `mcpjungle`, `Kokoro-FastAPI`, `searxng`).
+
+**Standalone containers** (llama-swap, Open WebUI):
+
+For llama-swap, stop and remove the existing container, then re-run the `docker run` command from the [llama-swap section](#llama-swap):
+```bash
+docker stop llama-swap
+docker rm llama-swap
+# Re-run the docker run command from the installation section
+```
+
+For Open WebUI, use Watchtower to update:
+```bash
+# One-time update
+docker run --rm --volume /var/run/docker.sock:/var/run/docker.sock containrrr/watchtower --run-once open-webui
+
+# Or set up automatic updates
+docker run -d --name watchtower --volume /var/run/docker.sock:/var/run/docker.sock containrrr/watchtower open-webui
+```
+
+**vLLM (Docker installation)**:
+
+Simply re-run your `docker run` command and the latest Docker image will be pulled automatically.
+
 ### Ollama
 
 Rerun the command that installs Ollama - it acts as an updater too:
@@ -1565,49 +1599,6 @@ For a manual installation, enter your virtual environment and update via `pip`:
 ```
 source vllm/.venv/bin/activate
 pip install vllm --upgrade
-```
-
-For a Docker installation, you're good to go when you re-run your Docker command, because it pulls the latest Docker image for vLLM.
-
-### llama-swap
-
-Delete the current container:
-```bash
-docker stop llama-swap
-docker rm llama-swap
-```
-
-Re-run the container command from the [llama-swap section](#llama-swap).
-
-### Open WebUI
-
-To update Open WebUI once, run the following command:
-```
-docker run --rm --volume /var/run/docker.sock:/var/run/docker.sock containrrr/watchtower --run-once open-webui
-```
-
-To keep it updated automatically, run the following command:
-```
-docker run -d --name watchtower --volume /var/run/docker.sock:/var/run/docker.sock containrrr/watchtower open-webui
-```
-
-### mcp-proxy/MCPJungle
-
-Navigate to the directory and pull the latest container image:
-```bash
-cd mcp-proxy # or mcpjungle
-docker compose down
-docker compose pull
-docker compose up -d
-```
-
-### Kokoro FastAPI
-
-Navigate to the directory and pull the latest container image:
-```
-cd Kokoro-FastAPI
-docker compose pull
-docker compose up -d
 ```
 
 ### ComfyUI
