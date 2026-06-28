@@ -575,11 +575,11 @@ To power our search-based workflows, we don't want to rely on a search provider 
 
     Add the following:
     ```yaml
-      search:
-        # ...other parameters here...
-        formats:
-            - html
-            - json      # add this line
+    search:
+      # ...other parameters here...
+      formats:
+        - html
+        - json      # add this line
     ```
 
 3. Restart the container with `docker restart searxng`
@@ -810,38 +810,38 @@ In the installation below, we'll use `Qwen3-4B-Instruct-2507-UD-Q4_K_XL.gguf` fo
     **llama.cpp**
     ```yaml
     models:
-        "qwen3-4b":
-            proxy: "http://127.0.0.1:7000"
-            cmd: |
-                /app/llama-server
-                -m /models/Qwen3-4B-Instruct-2507-UD-Q4_K_XL.gguf
-                --port 7000 --host 0.0.0.0
+      "qwen3-4b":
+        proxy: "http://127.0.0.1:7000"
+        cmd: |
+          /app/llama-server
+          -m /models/Qwen3-4B-Instruct-2507-UD-Q4_K_XL.gguf
+          --port 7000 --host 0.0.0.0
     ```
 
     **vLLM (Docker)**
     ```yaml
     models:
-        "qwen3-4b":
-            proxy: "http://127.0.0.1:7000"
-            cmd: |
-                docker run --name qwen-vllm
-                --init --rm -p 7000:8080 --ipc=host
-                vllm/vllm-openai:latest
-                -m /models/Qwen/Qwen3-4B-Instruct-2507
-            cmdStop: docker stop qwen-vllm
+      "qwen3-4b":
+        proxy: "http://127.0.0.1:7000"
+        cmd: |
+          docker run --name qwen-vllm
+          --init --rm -p 7000:8080 --ipc=host
+          vllm/vllm-openai:latest
+          -m /models/Qwen/Qwen3-4B-Instruct-2507
+        cmdStop: docker stop qwen-vllm
     ```
 
     **vLLM (local)**:
     ```yaml
     models:
-        "qwen3-4b":
-            proxy: "http://127.0.0.1:7000"
-            cmd: |
-                source /app/vllm/.venv/bin/activate &&
-                /app/vllm/.venv/bin/vllm serve
-                -m /models/Qwen/Qwen3-4B-Instruct-2507
-                --port 7000 --host 0.0.0.0
-            cmdStop: pkill -f "vllm serve"
+      "qwen3-4b":
+        proxy: "http://127.0.0.1:7000"
+        cmd: |
+          source /app/vllm/.venv/bin/activate &&
+          /app/vllm/.venv/bin/vllm serve
+          -m /models/Qwen/Qwen3-4B-Instruct-2507
+          --port 7000 --host 0.0.0.0
+        cmdStop: pkill -f "vllm serve"
     ```
 
 3. Install the container:
@@ -1088,16 +1088,16 @@ mcp-proxy is a server proxy that allows switching between transports (stdio to s
       mcp-proxy:
         container_name: mcp-proxy
         build:
-            context: .
-            dockerfile: Dockerfile
+          context: .
+          dockerfile: Dockerfile
         networks:
-        - app-net
+          - app-net
         volumes:
-        - .:/config
-        - /:/<server_hostname>:ro
+          - .:/config
+          - /:/<server_hostname>:ro
         restart: unless-stopped
         ports:
-        - 3131:3131
+          - 3131:3131
         command: "--pass-environment --port=3131 --host 0.0.0.0 --transport streamablehttp --named-server-config /config/servers.json"
 
     networks:
@@ -1186,47 +1186,47 @@ MCPJungle is another MCP proxy server with a different focus. It focuses on prov
         image: postgres:latest
         container_name: mcpjungle-db
         environment:
-            POSTGRES_USER: mcpjungle
-            POSTGRES_PASSWORD: mcpjungle
-            POSTGRES_DB: mcpjungle
+          POSTGRES_USER: mcpjungle
+          POSTGRES_PASSWORD: mcpjungle
+          POSTGRES_DB: mcpjungle
         ports:
-        - "5432:5432"
+          - "5432:5432"
         networks:
-        - app-net
+          - app-net
         volumes:
-        - db_data:/var/lib/postgresql/data
+          - db_data:/var/lib/postgresql/data
         healthcheck:
-            test: ["CMD-SHELL", "PGPASSWORD=mcpjungle pg_isready -U mcpjungle"]
-            interval: 10s
-            timeout: 5s
-            retries: 5
+          test: ["CMD-SHELL", "PGPASSWORD=mcpjungle pg_isready -U mcpjungle"]
+          interval: 10s
+          timeout: 5s
+          retries: 5
         restart: unless-stopped
 
       mcpjungle:
         image: mcpjungle/mcpjungle:${MCPJUNGLE_IMAGE_TAG:-latest-stdio}
         container_name: mcpjungle-server
         environment:
-            DATABASE_URL: postgres://mcpjungle:mcpjungle@db:5432/mcpjungle
-            SERVER_MODE: ${SERVER_MODE:-development}
-            OTEL_ENABLED: ${OTEL_ENABLED:-false}
+          DATABASE_URL: postgres://mcpjungle:mcpjungle@db:5432/mcpjungle
+          SERVER_MODE: ${SERVER_MODE:-development}
+          OTEL_ENABLED: ${OTEL_ENABLED:-false}
         ports:
-        - "4141:8080"
+          - "4141:8080"
         networks:
-        - app-net
+          - app-net
         volumes:
-        # Mount host filesystem current directory to enable filesystem MCP server access
-        - .:/host/project:ro
-        - /home/<username>:/host:ro
-        # Other options:
-        # - ${HOME}:/host/home:ro
-        # - /tmp:/host/tmp:rw
+          # Mount host filesystem current directory to enable filesystem MCP server access
+          - .:/host/project:ro
+          - /home/<username>:/host:ro
+          # Other options:
+          # - ${HOME}:/host/home:ro
+          # - /tmp:/host/tmp:rw
         depends_on:
-        db:
+          db:
             condition: service_healthy
         restart: always
 
     volumes:
-        db_data:
+      db_data:
 
     networks:
       app-net:
