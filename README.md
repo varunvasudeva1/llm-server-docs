@@ -11,8 +11,11 @@ Software Stack:
 - MCP Proxy Server ([mcp-proxy](https://github.com/sparfenyuk/mcp-proxy), [MCPJungle](https://github.com/mcpjungle/MCPJungle))
 - Text-to-Speech Server ([Kokoro FastAPI](https://github.com/remsky/Kokoro-FastAPI))
 - Image Generation Server ([ComfyUI](https://github.com/comfyanonymous/ComfyUI))
+- VPN/Remote Access ([Tailscale](https://tailscale.com))
+- Reverse Proxy ([Caddy](https://github.com/caddyserver/caddy))
+- DNS Provider ([Cloudflare](https://www.cloudflare.com))
 
-![Software Stack Architectural Diagram](llm-server-architecture.png)
+![Software Stack Architectural Diagram](media/llm-server-architecture.png)
 
 ## Table of Contents
 
@@ -44,13 +47,10 @@ Software Stack:
     - [Ollama](#ollama)
     - [llama.cpp](#llamacpp)
     - [vLLM](#vllm)
-    - [Open WebUI Integration](#open-webui-integration-1)
-    - [Ollama vs. llama.cpp](#ollama-vs-llamacpp)
-    - [vLLM vs. Ollama/llama.cpp](#vllm-vs-ollamallamacpp)
   - [Model Server](#model-server)
     - [llama-swap](#llama-swap)
     - [`systemd` Service](#systemd-service)
-    - [Open WebUI Integration](#open-webui-integration-2)
+    - [Open WebUI Integration](#open-webui-integration-1)
       - [llama-swap](#llama-swap-1)
       - [`systemd` Service](#systemd-service-1)
   - [Chat Platform](#chat-platform)
@@ -59,34 +59,26 @@ Software Stack:
     - [mcp-proxy](#mcp-proxy)
     - [MCPJungle](#mcpjungle)
     - [Comparison](#comparison)
-    - [Open WebUI Integration](#open-webui-integration-3)
+    - [Open WebUI Integration](#open-webui-integration-2)
       - [mcp-proxy](#mcp-proxy-1)
       - [MCPJungle](#mcpjungle-1)
     - [VS Code/Claude Desktop Integration](#vs-codeclaude-desktop-integration)
   - [Text-to-Speech Server](#text-to-speech-server)
     - [Kokoro FastAPI](#kokoro-fastapi)
-    - [Open WebUI Integration](#open-webui-integration-4)
+    - [Open WebUI Integration](#open-webui-integration-3)
   - [Image Generation Server](#image-generation-server)
     - [ComfyUI](#comfyui)
-    - [Open WebUI Integration](#open-webui-integration-5)
+    - [Open WebUI Integration](#open-webui-integration-4)
   - [SSH](#ssh)
   - [Firewall](#firewall)
   - [Remote Access](#remote-access)
-    - [Tailscale](#tailscale)
-      - [Installation](#installation)
-      - [Exit Nodes](#exit-nodes)
-      - [Local DNS](#local-dns)
-      - [Third-Party VPN Integration](#third-party-vpn-integration)
   - [Updating](#updating)
     - [General](#general-1)
     - [Nvidia Drivers \& CUDA](#nvidia-drivers--cuda)
+    - [Docker Services](#docker-services)
     - [Ollama](#ollama-1)
     - [llama.cpp](#llamacpp-1)
     - [vLLM](#vllm-1)
-    - [llama-swap](#llama-swap-2)
-    - [Open WebUI](#open-webui-1)
-    - [mcp-proxy/MCPJungle](#mcp-proxymcpjungle)
-    - [Kokoro FastAPI](#kokoro-fastapi-1)
     - [ComfyUI](#comfyui-1)
   - [Troubleshooting](#troubleshooting)
     - [Docker](#docker-1)
@@ -94,7 +86,7 @@ Software Stack:
     - [Nvidia Drivers](#nvidia-drivers)
     - [Ollama](#ollama-2)
     - [vLLM](#vllm-2)
-    - [Open WebUI](#open-webui-2)
+    - [Open WebUI](#open-webui-1)
   - [Monitoring](#monitoring)
   - [Notes](#notes)
     - [Software](#software)
@@ -109,7 +101,7 @@ This repository outlines the steps to run a server for running local language mo
 The process involves installing the requisite drivers, setting the GPU power limit, setting up auto-login, and scheduling the `init.bash` script to run at boot. All these settings are based on my ideal setup for a language model server that runs most of the day but a lot can be customized to suit your needs.
 
 > [!IMPORTANT]
-> No part of this guide was written using AI - any hallucinations are the good old human kind. While I've done my absolute best to ensure correctness in every step/command, check **everything** you execute in a terminal. Enjoy!
+> No part of this guide was written using AI - any hallucinations are the good old human kind. AI is used to format Markdown elements and vet for any technical inaccuracies. While I've done my absolute best to ensure correctness in every step/command, check **everything** you execute in a terminal. Enjoy!
 
 ## Priorities
 
@@ -216,7 +208,7 @@ Now, we'll install the required GPU drivers that allow programs to utilize their
 
 We'll also install some packages that are not installed on Debian by default but may be required later:
 ```
-sudo apt install libcurl cmake
+sudo apt install libcurl cmake build-essential
 ```
 
 ### Schedule Startup Script
@@ -456,198 +448,12 @@ docker exec -it llama-swap curl http://open-webui:8080
 
 ### Harden Docker Containers
 
-To "harden" something in software terms is to make it more secure and more resilient to cyberattacks. Usually, this involves reducing the surface area by which an attacker can gain access to the system but it also includes mitigating what an attacker can do assuming they have successfully gotten access. Essentially, we will set up both prevention and cure - although, as they say, an ounce of prevention is better than a pound of cure. This sub-section leverages knowledge from [this Reddit comment](https://www.reddit.com/r/selfhosted/comments/1pr74r4/comment/nv07sp4/), courtesy of [u/arnedam](https://www.reddit.com/user/arnedam/). Another good reference is the [OWASP Docker Security Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Docker_Security_Cheat_Sheet.html).
+Docker security is is **critical** for public-facing services. It involves reducing attack surfaces, eliminating terminal abilities for containers, and limiting resource usage. Even if you only intend to access your services via a private network (preferred if possible), shoring up security is never a bad idea because it limits how much damage can be done to your server and its services if it ever was to become compromised somehow.
 
-To a large extent, the security objectives we're aiming towards can be achieved by applying the [Principle of Least Privilege (PoLP)](https://en.wikipedia.org/wiki/Principle_of_least_privilege) - in other words, giving our containers exactly and **only** what they need to perform their function. For each guideline, I've provided an existing risk and a mitigation strategy (along with how it fixes the problem); while not strictly necessary, learning *how* things are at risk is beneficial to start thinking securely about the services you host.
+📖 See the full guide at [Docker Security](docs/docker-security.md). 
 
-> [!NOTE]
-> This sub-section is **critical** for public-facing services. However, even if you only intend to access your services via a private network (**preferred if possible**), doing this is quite literally never a bad idea because it limits how much damage can be done to your server and its services if it ever was to become compromised somehow.
-
-1. Run the service under your user, not root:
-    ```yaml
-    user: "<your_user_id>:<your_group_id>"
-    ```
-    To find `<your_user_id>`, run `id -u`. To find `<your_group_id>`, run `id -g`.
-
-    **RISK**: Unless specified otherwise, containers run under the root user. Compromised containers running under root can do all sorts of damage, ranging anywhere from executing malicious code to prying on/deleting system files.
-
-    **MITIGATION**: By specifying a user that the container runs under, the container's privilege is limited to the user's privilege, which is almost definitively lower than the root user's privilege to modify the system.
-
-2. Make the file system read-only:
-    ```yaml
-    read_only: true
-    ```
-
-    **RISK**: By default, containers are allowed to read and write the files they have access to. This means an attacker who has successfully compromised your container could write bogus files/malicious code and spy on/delete critical information.
-    
-    **MITIGATION**: Adding this will prevent attackers from being able to write malicious code files or delete important data from your system that are accessible to the container.
-
-> [!WARNING]
-> Apply the `read_only: true` directive with care: if your service leverages file writes, like the many services that write to `/tmp`, those subprocesses will fail. If those subprocesses are critical, you may even see the container fail to start. Expect this **not** to work in an all-encompassing way for all containers - you will most likely need to surgically apply the `:ro` directive to volume mounts in most places.
-
-3. Limit the physical resources your container can access:
-    ```yaml
-    # maximum number of processes the container can execute
-    pids_limit: 512
-    # maximium memory for the container
-    mem_limit: 3g
-    # maximum number of CPU cores the container can utilize - can be fractional
-    cpus: 3
-    ```
-
-    **RISK**: Containers are, by default, given unrestricted physical resource allocation capabilities. This means that if a container was to be compromised, it would be able to allocate as much of your CPU clock cycles, RAM capacity, and VRAM capacity to executing malicious code.
-
-    **MITIGATION**: Allocating fixed limits to resources will prevent attackers from using the entirety of your server's physical resources to do damage if your container was to be compromised, e.g. running a botnet via your machine.
-
-    **Docker Swarm**
-
-    If you're using Docker Swarm (not used in this guide), you need to format it slightly differently:
-
-    ```yaml
-    deploy:
-      resources:
-        limits:
-          pids: 512
-          memory: 3g
-          cpus: 3
-    ```
-
-4. Disable `tty` and `stdin` in the container:
-    ```yaml
-    tty: false
-    stdin_open: false
-    ```
-
-    **RISK**: `stdin` gives the container the ability for commands to be written to it (input injection) and `tty` gives the container an active shell environment - together, they grant the container complete interactive shell capability such that potentially malicious commands can be run from it.
-
-    **MITIGATION**: Disabling these will prevent attackers from being able to execute code via the containers, severely minimizing [arbitrary code execution](https://en.wikipedia.org/wiki/Arbitrary_code_execution) (ACE) vulnerabilities.
-
-5. Disallow the container from elevating its own privileges:
-    ```yaml
-    security_opt:
-      - "no-new-privileges=true"
-    ```
-
-    **RISK**: Containers are able to elevate their own access given an interactive shell environment. This could even override the `user` directive provided earlier, giving root-level access to the system via the container.
-
-    **MITIGATION**: Adding this line will prevent attackers from being able to override the `user` directive we provided earlier and stop them from being able to grant the now-compromised container root-level permissions.
-
-6. Drop default container capabilities:
-    ```yaml
-    cap_drop:
-      - ALL
-    ```
-
-    **RISK**: Containers are given a lot of permissions by default. Most of these permissions are not required by most containers. Giving extra access increases the attack vector surface area in case a container was to become compromised - especially since these capabilities can impact the host kernel.
-
-    **MITIGATION**: Adding this will drop the widely-permissive default permissions granted to containers. This ensures that we only give containers the system capabilities to do the things they are required to do.
-
-    `cap_drop` with a value of `ALL` can be too aggressive for containers that require multiple capabilities. In this case, right after the above block, consider reviewing the following commonly-used capabilities. They are **not all required and should not all be added** - they are just a starting point for some capabilities sometimes required by containers.
-    ```yaml
-    cap_add:
-      # LOWER RISK
-      # Make arbitrary changes to file UIDs and GIDs (see chown(2))
-      - CHOWN
-      # Make arbitrary manipulations of process GIDs and supplementary GID list
-      - SETGID
-      # Make arbitrary manipulations of process UIDs
-      - SETUID
-      # Bind a socket to internet domain privileged ports (port numbers less than 1024)
-      - NET_BIND_SERVICE
-
-      # HIGHER RISK - CAN AFFECT IMPORTANT SYSTEM-LEVEL CONFIGURATIONS
-      # Perform various network-related operations
-      - NET_ADMIN
-      # Use RAW and PACKET sockets
-      - NET_RAW
-      # Perform a range of system administration operations
-      - SYS_ADMIN
-    ```
-
-    This will, in order, drop all capabilities and then surgically re-add the ones that are required for the functionality the container achieves. A complete list of capabilities can be found [here](https://docs.docker.com/engine/containers/run/#runtime-privilege-and-linux-capabilities).
-    
-    Containers with inadequate capabilities will fail to run. If you drop one that is required, you could:
-    1. Ideally, take a look at the list of capabilities referenced above, and perform some trial-and-error addition of capabilities. LLMs can help greatly with this endeavor, especially when equipped with tools that can make them capable of reading documentation or the source code of the service you're looking to run. You can skip this directive until you have everything configured and come back to it later.
-    2. Less ideally, give up and remove the `cap_drop` directive entirely. I wouldn't recommend it but, with private services, this is hardly the most insecure setup in the world if you do everything else.
-
-7. Prevent excessive logging:
-    ```yaml
-    logging:
-      driver: "json-file"
-      options:
-        max-file: "10"
-        max-size: "20m"
-    ```
-
-    **RISK**: Much like a [zip bomb](https://en.wikipedia.org/wiki/Zip_bomb), a logging bomb can recursively clutter and eventually render the system unusable by overwhelming the system with an ever-increasing number of large log files.
-
-    **MITIGATION**: By capping the maximum number of files (10) and sizes of the individual files (20MB), we can limit the effectiveness of an attack like this. 
-
-    Feel free to change the limits (reasonably) as you wish if you run into issues.
-
-8. Limit the temporary file directory's privileges:
-    ```yaml
-    tmpfs:
-      - /tmp:rw,noexec,nosuid,nodev,size=512m
-    ```
-
-    **RISK**: If allowed to download files, compromised containers could both install malicious files to the filesystem and execute them.
-
-    **MITIGATION**: Setting up a temporary file area with very limited permissions stops this potential attack vector. Containers are limited to downloading files here, in a little sandbox with a fixed small size and without script execution privileges.
-
-9. Mount read-only volumes:
-    ```yaml
-    volumes:
-      - /path/to/mount1:/mount1:ro
-      - /path/to/mount2:/mount2:ro
-    ```
-
-    **RISK**: To access the file system of the host, Docker containers need directories "mounted" as volumes. This lets them read and write from the host as if the container was the host itself. Allowing write access to every mount is usually not necessary and can allow a compromised container to delete or overwrite important information in a cyber-attack.
-
-    **MITIGATION**: Mounting volumes as read-only, wherever possible, eliminates the container's ability to destroy the data in those volumes via writes. This wouldn't prevent spyware, but it would limit data from being lost in an attack.
-
-    > Replace `/path/to/mount1` and `/path/to/mount2` with actual directory paths.
-
-> [!IMPORTANT]
-> For containers where free allocation of CPU cores and memory is crucial - llama-swap, for example - you will not want to limit the maximum resources the container can access as shown in step 3.
-
-Here's a combined chunk to copy + paste into your existing services' Compose files:
-
-```yaml
-services:
-  <service_name>:
-    # 1
-    user: "<your_user_id>:<your_group_id>"
-    # 2 - Uncomment only if the container does not write
-    # read_only: true
-    # 3
-    pids_limit: 512
-    mem_limit: 3g
-    cpus: 3
-    # 4
-    tty: false
-    stdin_open: false
-    # 5
-    security_opt:
-      - "no-new-privileges=true"
-    # 6
-    cap_drop:
-      - ALL
-    # Add cap_add section if required
-    # 7
-    logging:
-      driver: "json-file"
-      options:
-        max-file: "10"
-        max-size: "20m"
-    # 8
-    tmpfs:
-      - /tmp:rw,noexec,nosuid,nodev,size=512m
-    # 9
-    volumes:
-      - /path/to/mount1:/mount1:ro
-      - /path/to/mount2:/mount2:ro
-```
+> [!TIP]
+> The combined example at the end provides a ready-to-paste YAML block with all hardening directives. You can copy it directly into your existing Compose files and customize as needed.
 
 ### Helpful Commands
 
@@ -766,11 +572,11 @@ To power our search-based workflows, we don't want to rely on a search provider 
 
     Add the following:
     ```yaml
-      search:
-        # ...other parameters here...
-        formats:
-            - html
-            - json      # add this line
+    search:
+      # ...other parameters here...
+      formats:
+        - html
+        - json      # add this line
     ```
 
 3. Restart the container with `docker restart searxng`
@@ -786,7 +592,9 @@ In case you want a simple web search workflow and want to skip MCP servers/agent
 
 ## Inference Engine
 
-The inference engine is one of the primary components of this setup. It is code that takes model files containing weights and makes it possible to get useful outputs from them. This guide allows a choice between llama.cpp, vLLM, and Ollama - all of these are popular inference engines with different priorities and stengths (note: Ollama uses llama.cpp under the hood and is simply a CLI wrapper). It can be daunting to jump straight into the deep end with command line arguments in llama.cpp and vLLM. If you're a power user and enjoy the flexibility afforded by tight control over serving parameters, using either llama.cpp or vLLM will be a wonderful experience and really come down to the quantization format you decide. However, if you're a beginner or aren't yet comfortable with this, Ollama can be convenient stopgap while you build the skills you need or the very end of the line if you decide your current level of knowledge is enough!
+The inference engine is the software layer that loads model weights and manages text generation. This guide supports three popular engines: Ollama, llama.cpp, and vLLM. Each offers different trade-offs between ease of use, control, and performance.
+
+If you're unsure where to begin and want some more context, see a detailed comparison in [Comparing Inference Engines](docs/inference-engine-comparison.md). It goes into what inference is, how the engines tackle it differently, and what the best fit for you might be.
 
 ### Ollama
 
@@ -828,6 +636,11 @@ We want our API endpoint to be reachable by the rest of the LAN. For Ollama, thi
 📖 [**Documentation**](https://github.com/ggml-org/llama.cpp/tree/master/docs)  
 🔧 [**Engine Arguments**](https://github.com/ggml-org/llama.cpp/tree/master/examples/server)
 
+> [!TIP]
+> This is my recommended inference engine. My biggest reasons are
+> 1. the `--fit` flag and its ability to automatically load any model by calculating offload requirements based on available system resources, and
+> 2. insanely quick model load times, especially compared to vLLM.
+
 - Clone the llama.cpp GitHub repository:
     ```
     git clone https://github.com/ggml-org/llama.cpp.git
@@ -838,15 +651,17 @@ We want our API endpoint to be reachable by the rest of the LAN. For Ollama, thi
     **CPU**
     ```
     cmake -B build
-    cmake --build build --config Release
+    cmake --build build --config Release -j <threads>
     ```
 
     **CUDA**
     ```
     cmake -B build -DGGML_CUDA=ON
-    cmake --build build --config Release
+    cmake --build build --config Release -j <threads>
     ```
-    For other systems looking to use Metal, Vulkan and other low-level graphics APIs, view the complete [llama.cpp build documentation](https://github.com/ggml-org/llama.cpp/blob/master/docs/build.md) to leverage accelerated inference.
+    > Replace `<threads>` with `[number of threads your CPU has] - 2`. This offers a massive boost to the build process as it leverages your system resources better.
+
+For other systems looking to use Metal, Vulkan and other low-level graphics APIs, view the complete [llama.cpp build documentation](https://github.com/ggml-org/llama.cpp/blob/master/docs/build.md) to leverage accelerated inference.
 
 ### vLLM
 
@@ -921,54 +736,6 @@ To serve a different model:
     --model <model>
     ```
 
-### Open WebUI Integration
-> [!NOTE]
-> Only needed for llama.cpp/vLLM.
-
-Navigate to `Admin Panel > Settings > Connections` and set the following values:
-
-- Enable `OpenAI API`
-- API Base URL: `http://host.docker.internal:<port>/v1`
-- API Key: `anything-you-like`
-
-> [!NOTE]
-> `host.docker.internal` is a magic hostname that resolves to the internal IP address assigned to the host by Docker. This allows containers to communicate with services running on the host, such as databases or web servers, without needing to know the host's IP address. It simplifies communication between containers and host-based services, making it easier to develop and deploy applications.
-
-### Ollama vs. llama.cpp
-
-| **Aspect**                 | **Ollama (Wrapper)**                                          | **llama.cpp (Vanilla)**                                                                   |
-| -------------------------- | ------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| **Installation/Setup**     | One-click install & CLI model management                      | Requires manual setup/configuration                                                       |
-| **Open WebUI Integration** | First-class citizen                                           | Requires OpenAI-compatible endpoint setup                                                 |
-| **Model Switching**        | Native model-switching via server                             | Requires manual port management or [llama-swap](https://github.com/mostlygeek/llama-swap) |
-| **Customizability**        | Limited: Modelfiles are cumbersome                            | Full control over parameters via CLI                                                      |
-| **Transparency**           | Defaults may override model parameters (e.g., context length) | Full transparency in parameter settings                                                   |
-| **GGUF Support**           | Inherits llama.cpp's best-in-class implementation             | Best GGUF implementation                                                                  |
-| **GPU-CPU Splitting**      | Inherits llama.cpp's efficient splitting                      | Trivial GPU-CPU splitting out-of-the-box                                                  |
-
----
-
-### vLLM vs. Ollama/llama.cpp
-| **Feature**             | **vLLM**                                     | **Ollama/llama.cpp**                                                                  |
-| ----------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------- |
-| **Vision Models**       | Supports Qwen 2.5 VL, Llama 3.2 Vision, etc. | Ollama supports some vision models, llama.cpp does not support any (via llama-server) |
-| **Quantization**        | Supports AWQ, GPTQ, BnB, etc.                | Only supports GGUF                                                                    |
-| **Multi-GPU Inference** | Yes                                          | Yes                                                                                   |
-| **Tensor Parallelism**  | Yes                                          | No                                                                                    |
-
-In summary,
-
-- **Ollama**: Best for those who want an "it just works" experience.
-- **llama.cpp**: Best for those who want total control over their inference servers and are familiar with engine arguments.
-- **vLLM**: Best for those who want (i) to run non-GGUF quantizations of models, (ii) multi-GPU inference using tensor parallelism, or (iii) to use vision models.
-
-Using Ollama as a service offers no degradation in experience because unused models are offloaded from VRAM after some time. Using vLLM or llama.cpp as a service keeps a model in memory, so I wouldn't use this alongside Ollama in an automated, always-on fashion unless it was your primary inference engine. Essentially,
-
-| Primary Engine | Secondary Engine | Run SE as service? |
-| -------------- | ---------------- | ------------------ |
-| Ollama         | llama.cpp/vLLM   | No                 |
-| llama.cpp/vLLM | Ollama           | Yes                |
-
 ## Model Server
 
 > [!NOTE]
@@ -1001,38 +768,38 @@ In the installation below, we'll use `Qwen3-4B-Instruct-2507-UD-Q4_K_XL.gguf` fo
     **llama.cpp**
     ```yaml
     models:
-        "qwen3-4b":
-            proxy: "http://127.0.0.1:7000"
-            cmd: |
-                /app/llama-server
-                -m /models/Qwen3-4B-Instruct-2507-UD-Q4_K_XL.gguf
-                --port 7000 --host 0.0.0.0
+      "qwen3-4b":
+        proxy: "http://127.0.0.1:7000"
+        cmd: |
+          /app/llama-server
+          -m /models/Qwen3-4B-Instruct-2507-UD-Q4_K_XL.gguf
+          --port 7000 --host 0.0.0.0
     ```
 
     **vLLM (Docker)**
     ```yaml
     models:
-        "qwen3-4b":
-            proxy: "http://127.0.0.1:7000"
-            cmd: |
-                docker run --name qwen-vllm
-                --init --rm -p 7000:8080 --ipc=host
-                vllm/vllm-openai:latest
-                -m /models/Qwen/Qwen3-4B-Instruct-2507
-            cmdStop: docker stop qwen-vllm
+      "qwen3-4b":
+        proxy: "http://127.0.0.1:7000"
+        cmd: |
+          docker run --name qwen-vllm
+          --init --rm -p 7000:8080 --ipc=host
+          vllm/vllm-openai:latest
+          -m /models/Qwen/Qwen3-4B-Instruct-2507
+        cmdStop: docker stop qwen-vllm
     ```
 
     **vLLM (local)**:
     ```yaml
     models:
-        "qwen3-4b":
-            proxy: "http://127.0.0.1:7000"
-            cmd: |
-                source /app/vllm/.venv/bin/activate &&
-                /app/vllm/.venv/bin/vllm serve
-                -m /models/Qwen/Qwen3-4B-Instruct-2507
-                --port 7000 --host 0.0.0.0
-            cmdStop: pkill -f "vllm serve"
+      "qwen3-4b":
+        proxy: "http://127.0.0.1:7000"
+        cmd: |
+          source /app/vllm/.venv/bin/activate &&
+          /app/vllm/.venv/bin/vllm serve
+          -m /models/Qwen/Qwen3-4B-Instruct-2507
+          --port 7000 --host 0.0.0.0
+        cmdStop: pkill -f "vllm serve"
     ```
 
 3. Install the container:
@@ -1250,6 +1017,9 @@ You can access it by navigating to `http://localhost:3000` in your browser or `h
 
 Read more about Open WebUI [here](https://github.com/open-webui/open-webui).
 
+> [!NOTE]
+> `host.docker.internal` is a magic hostname that resolves to the internal IP address assigned to the host by Docker. This allows containers to communicate with services running on the host, such as databases or web servers, without needing to know the host's IP address. It simplifies communication between containers and host-based services, making it easier to develop and deploy applications.
+
 ## MCP Proxy Server
 
 Model Context Protocol (MCP) is a protocol that tools (functions/scripts written in code) to LLMs in a standardized way. Generally, models are being trained more and more with the ability to natively call tools in order to power agentic tasks - think along the lines of having a model use sequential thinking to formulate multiple thoughts, execute multiple targeted web searches, and provide a response leveraging real-time information. MCP also, probably more importantly for most people, enables models to call third-party tools like those for GitHub, Azure, etc. A complete list, curated and maintained by Anthropic, can be found [here](https://github.com/modelcontextprotocol/servers).
@@ -1279,16 +1049,16 @@ mcp-proxy is a server proxy that allows switching between transports (stdio to s
       mcp-proxy:
         container_name: mcp-proxy
         build:
-            context: .
-            dockerfile: Dockerfile
+          context: .
+          dockerfile: Dockerfile
         networks:
-        - app-net
+          - app-net
         volumes:
-        - .:/config
-        - /:/<server_hostname>:ro
+          - .:/config
+          - /:/<server_hostname>:ro
         restart: unless-stopped
         ports:
-        - 3131:3131
+          - 3131:3131
         command: "--pass-environment --port=3131 --host 0.0.0.0 --transport streamablehttp --named-server-config /config/servers.json"
 
     networks:
@@ -1377,47 +1147,47 @@ MCPJungle is another MCP proxy server with a different focus. It focuses on prov
         image: postgres:latest
         container_name: mcpjungle-db
         environment:
-            POSTGRES_USER: mcpjungle
-            POSTGRES_PASSWORD: mcpjungle
-            POSTGRES_DB: mcpjungle
+          POSTGRES_USER: mcpjungle
+          POSTGRES_PASSWORD: mcpjungle
+          POSTGRES_DB: mcpjungle
         ports:
-        - "5432:5432"
+          - "5432:5432"
         networks:
-        - app-net
+          - app-net
         volumes:
-        - db_data:/var/lib/postgresql/data
+          - db_data:/var/lib/postgresql/data
         healthcheck:
-            test: ["CMD-SHELL", "PGPASSWORD=mcpjungle pg_isready -U mcpjungle"]
-            interval: 10s
-            timeout: 5s
-            retries: 5
+          test: ["CMD-SHELL", "PGPASSWORD=mcpjungle pg_isready -U mcpjungle"]
+          interval: 10s
+          timeout: 5s
+          retries: 5
         restart: unless-stopped
 
       mcpjungle:
         image: mcpjungle/mcpjungle:${MCPJUNGLE_IMAGE_TAG:-latest-stdio}
         container_name: mcpjungle-server
         environment:
-            DATABASE_URL: postgres://mcpjungle:mcpjungle@db:5432/mcpjungle
-            SERVER_MODE: ${SERVER_MODE:-development}
-            OTEL_ENABLED: ${OTEL_ENABLED:-false}
+          DATABASE_URL: postgres://mcpjungle:mcpjungle@db:5432/mcpjungle
+          SERVER_MODE: ${SERVER_MODE:-development}
+          OTEL_ENABLED: ${OTEL_ENABLED:-false}
         ports:
-        - "4141:8080"
+          - "4141:8080"
         networks:
-        - app-net
+          - app-net
         volumes:
-        # Mount host filesystem current directory to enable filesystem MCP server access
-        - .:/host/project:ro
-        - /home/<username>:/host:ro
-        # Other options:
-        # - ${HOME}:/host/home:ro
-        # - /tmp:/host/tmp:rw
+          # Mount host filesystem current directory to enable filesystem MCP server access
+          - .:/host/project:ro
+          - /home/<username>:/host:ro
+          # Other options:
+          # - ${HOME}:/host/home:ro
+          # - /tmp:/host/tmp:rw
         depends_on:
-        db:
+          db:
             condition: service_healthy
         restart: always
 
     volumes:
-        db_data:
+      db_data:
 
     networks:
       app-net:
@@ -1704,52 +1474,9 @@ Refer to [this guide](https://www.digitalocean.com/community/tutorials/how-to-se
 
 ## Remote Access
 
-Remote access refers to the ability to access your server outside of your home network. For example, when you leave the house, you aren't going to be able to access `http://<your_server_ip>`, because your network has changed from your home network to some other network (either your mobile carrier's or a local network in some other place). This means that you won't be able to access the services running on your server. There are many solutions on the web that solve this problem and we'll explore some of the easiest-to-use here.
+This section covers the software required to allow secure and efficient access to the homelab environment. It involves leveraging Caddy as a reverse proxy engine, Cloudflare as a DNS provider, and Tailscale for the mesh VPN that provides built-in security due to firewall hole punching. It is highly recommended if you're looking at building a system that will be used professionally or even by family and friends.
 
-### Tailscale
-
-Tailscale is a peer-to-peer VPN service that combines many services into one. Its most common use-case is to bind many different devices of many different kinds (Windows, Linux, macOS, iOS, Android, etc.) on one virtual network. This way, all these devices can be connected to different networks but still be able to communicate with each other as if they were all on the same local network. Tailscale is not completely open source (its GUI is proprietary), but it is based on the [Wireguard](https://www.wireguard.com) VPN protocol and the remainder of the actual service is open source. Comprehensive documentation on the service can be found [here](https://tailscale.com/kb) and goes into many topics not mentioned here - I would recommend reading it to get the most of out the service.
-
-On Tailscale, networks are referred to as tailnets. Creating and managing tailnets requires creating an account with Tailscale (an expected scenario with a VPN service) but connections are peer-to-peer and happen without any routing to Tailscale servers. This connection being based on Wireguard means 100% of your traffic is encrypted and cannot be accessed by anyone but the devices on your tailnet.
-
-#### Installation
-
-First, create a tailnet through the Admin Console on Tailscale. Download the Tailscale app on any client you want to access your tailnet from. For Windows, macOS, iOS, and Android, the apps can be found on their respective OS app stores. After signing in, your device will be added to the tailnet.
-
-For Linux, the steps required are as follows.
-
-1) Install Tailscale
-    ```
-    curl -fsSL https://tailscale.com/install.sh | sh
-    ```
-
-2) Start the service
-    ```
-    sudo tailscale up
-    ```
-
-For SSH, run `sudo tailscale up --ssh`.
-
-#### Exit Nodes
-
-An exit node allows access to a different network while still being on your tailnet. For example, you can use this to allow a server on your network to act as a tunnel for other devices. This way, you can not only access that device (by virtue of your tailnet) but also all the devices on the host network its on. This is useful to access non-Tailscale devices on a network.
-
-To advertise a device on as an exit node, run `sudo tailscale up --advertise-exit-node`. To allow access to the local network via this device, add the `--exit-node-allow-lan-access` flag.
-
-#### Local DNS
-
-If one of the devices on your tailnet runs a [DNS-sinkhole](https://en.wikipedia.org/wiki/DNS_sinkhole) service like [Pi-hole](https://pi-hole.net), you'll probably want other devices to use it as their DNS server. Assume this device is named `poplar`. This means every networking request made by a any device on your tailnet will send this request to `poplar`, which will in turn decide whether that request will be answered or rejected according to your Pi-hole configuration. However, since `poplar` is also one of the devices on your tailnet, it will send networking requests to itself in accordance with this rule and not to somewhere that will actually resolve the request. Thus, we don't want such devices to accept the DNS settings according to the tailnet but follow their otherwise preconfigured rules.
-
-To reject the tailnet's DNS settings, run `sudo tailscale up --accept-dns=false`.
-
-#### Third-Party VPN Integration
-
-Tailscale offers a [Mullvad VPN](https://mullvad.net/en) exit node add-on with their service. This add-on allows for a traditional VPN experience that will route your requests through a proxy server in some other location, effectively masking your IP and allowing the circumvention of geolocation restrictions on web services. Assigned devices can be configured from the Admin Console. Mullvad VPN has [proven their no-log policy](https://mullvad.net/en/blog/2023/4/20/mullvad-vpn-was-subject-to-a-search-warrant-customer-data-not-compromised) and offers a fixed $5/month price no matter what duration you choose to pay for.
-
-To use a Mullvad exit on one of your devices, first find the exit node you want to use by running `sudo tailscale exit-node list`. Note the IP and run `sudo tailscale up --exit-node=<your_chosen_exit_node_ip>`.
-
-> [!WARNING]
-> Ensure the device is allowed to use the Mullvad add-on through the Admin Console first.
+📖 See the full guide at [Remote Access](docs/remote-access.md).
 
 ## Updating
 
@@ -1771,6 +1498,43 @@ Follow Nvidia's guide [here](https://developer.nvidia.com/cuda-downloads?target_
 
 > [!WARNING]
 > Don't skip this step. Not installing the latest drivers after upgrading Debian packages will throw your installations out of sync, leading to broken functionality. When updating, target everything important at once. Also, rebooting after this step is a good idea to ensure that your system is operating as expected after upgrading these crucial drivers.
+
+### Docker Services
+
+Most services in this guide run via Docker and can be updated using the same general pattern. Navigate to the directory containing the service's compose file or container and use the appropriate commands below.
+
+**Docker Compose services**:
+
+```bash
+cd <service-directory>
+docker compose down
+docker compose pull
+docker compose up -d
+```
+
+> Replace `<service-directory>` with the directory containing the `docker-compose.yaml` file (e.g., `mcp-proxy`, `mcpjungle`, `Kokoro-FastAPI`, `searxng`).
+
+**Standalone containers** (llama-swap, Open WebUI):
+
+For llama-swap, stop and remove the existing container, then re-run the `docker run` command from the [llama-swap section](#llama-swap):
+```bash
+docker stop llama-swap
+docker rm llama-swap
+# Re-run the docker run command from the installation section
+```
+
+For Open WebUI, use Watchtower to update:
+```bash
+# One-time update
+docker run --rm --volume /var/run/docker.sock:/var/run/docker.sock containrrr/watchtower --run-once open-webui
+
+# Or set up automatic updates
+docker run -d --name watchtower --volume /var/run/docker.sock:/var/run/docker.sock containrrr/watchtower open-webui
+```
+
+**vLLM (Docker installation)**:
+
+Simply re-run your `docker run` command and the latest Docker image will be pulled automatically.
 
 ### Ollama
 
@@ -1796,49 +1560,6 @@ For a manual installation, enter your virtual environment and update via `pip`:
 ```
 source vllm/.venv/bin/activate
 pip install vllm --upgrade
-```
-
-For a Docker installation, you're good to go when you re-run your Docker command, because it pulls the latest Docker image for vLLM.
-
-### llama-swap
-
-Delete the current container:
-```bash
-docker stop llama-swap
-docker rm llama-swap
-```
-
-Re-run the container command from the [llama-swap section](#llama-swap).
-
-### Open WebUI
-
-To update Open WebUI once, run the following command:
-```
-docker run --rm --volume /var/run/docker.sock:/var/run/docker.sock containrrr/watchtower --run-once open-webui
-```
-
-To keep it updated automatically, run the following command:
-```
-docker run -d --name watchtower --volume /var/run/docker.sock:/var/run/docker.sock containrrr/watchtower open-webui
-```
-
-### mcp-proxy/MCPJungle
-
-Navigate to the directory and pull the latest container image:
-```bash
-cd mcp-proxy # or mcpjungle
-docker compose down
-docker compose pull
-docker compose up -d
-```
-
-### Kokoro FastAPI
-
-Navigate to the directory and pull the latest container image:
-```
-cd Kokoro-FastAPI
-docker compose pull
-docker compose up -d
 ```
 
 ### ComfyUI
