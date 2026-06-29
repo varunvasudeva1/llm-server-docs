@@ -47,13 +47,10 @@ Software Stack:
     - [Ollama](#ollama)
     - [llama.cpp](#llamacpp)
     - [vLLM](#vllm)
-    - [Open WebUI Integration](#open-webui-integration-1)
-    - [Ollama vs. llama.cpp](#ollama-vs-llamacpp)
-    - [vLLM vs. Ollama/llama.cpp](#vllm-vs-ollamallamacpp)
   - [Model Server](#model-server)
     - [llama-swap](#llama-swap)
     - [`systemd` Service](#systemd-service)
-    - [Open WebUI Integration](#open-webui-integration-2)
+    - [Open WebUI Integration](#open-webui-integration-1)
       - [llama-swap](#llama-swap-1)
       - [`systemd` Service](#systemd-service-1)
   - [Chat Platform](#chat-platform)
@@ -62,16 +59,16 @@ Software Stack:
     - [mcp-proxy](#mcp-proxy)
     - [MCPJungle](#mcpjungle)
     - [Comparison](#comparison)
-    - [Open WebUI Integration](#open-webui-integration-3)
+    - [Open WebUI Integration](#open-webui-integration-2)
       - [mcp-proxy](#mcp-proxy-1)
       - [MCPJungle](#mcpjungle-1)
     - [VS Code/Claude Desktop Integration](#vs-codeclaude-desktop-integration)
   - [Text-to-Speech Server](#text-to-speech-server)
     - [Kokoro FastAPI](#kokoro-fastapi)
-    - [Open WebUI Integration](#open-webui-integration-4)
+    - [Open WebUI Integration](#open-webui-integration-3)
   - [Image Generation Server](#image-generation-server)
     - [ComfyUI](#comfyui)
-    - [Open WebUI Integration](#open-webui-integration-5)
+    - [Open WebUI Integration](#open-webui-integration-4)
   - [SSH](#ssh)
   - [Firewall](#firewall)
   - [Remote Access](#remote-access)
@@ -104,7 +101,7 @@ This repository outlines the steps to run a server for running local language mo
 The process involves installing the requisite drivers, setting the GPU power limit, setting up auto-login, and scheduling the `init.bash` script to run at boot. All these settings are based on my ideal setup for a language model server that runs most of the day but a lot can be customized to suit your needs.
 
 > [!IMPORTANT]
-> No part of this guide was written using AI - any hallucinations are the good old human kind. While I've done my absolute best to ensure correctness in every step/command, check **everything** you execute in a terminal. Enjoy!
+> No part of this guide was written using AI - any hallucinations are the good old human kind. AI is used to format Markdown elements and vet for any technical inaccuracies. While I've done my absolute best to ensure correctness in every step/command, check **everything** you execute in a terminal. Enjoy!
 
 ## Priorities
 
@@ -595,7 +592,9 @@ In case you want a simple web search workflow and want to skip MCP servers/agent
 
 ## Inference Engine
 
-The inference engine is one of the primary components of this setup. It is code that takes model files containing weights and makes it possible to get useful outputs from them. This guide allows a choice between llama.cpp, vLLM, and Ollama - all of these are popular inference engines with different priorities and stengths (note: Ollama uses llama.cpp under the hood and is simply a CLI wrapper). It can be daunting to jump straight into the deep end with command line arguments in llama.cpp and vLLM. If you're a power user and enjoy the flexibility afforded by tight control over serving parameters, using either llama.cpp or vLLM will be a wonderful experience and really come down to the quantization format you decide. However, if you're a beginner or aren't yet comfortable with this, Ollama can be convenient stopgap while you build the skills you need or the very end of the line if you decide your current level of knowledge is enough!
+The inference engine is the software layer that loads model weights and manages text generation. This guide supports three popular engines: Ollama, llama.cpp, and vLLM. Each offers different trade-offs between ease of use, control, and performance.
+
+If you're unsure where to begin and want some more context, see a detailed comparison in [Comparing Inference Engines](docs/inference-engine-comparison.md). It goes into what inference is, how the engines tackle it differently, and what the best fit for you might be.
 
 ### Ollama
 
@@ -637,6 +636,11 @@ We want our API endpoint to be reachable by the rest of the LAN. For Ollama, thi
 📖 [**Documentation**](https://github.com/ggml-org/llama.cpp/tree/master/docs)  
 🔧 [**Engine Arguments**](https://github.com/ggml-org/llama.cpp/tree/master/examples/server)
 
+> [!TIP]
+> This is my recommended inference engine. My biggest reasons are
+> 1. the `--fit` flag and its ability to automatically load any model by calculating offload requirements based on available system resources, and
+> 2. insanely quick model load times, especially compared to vLLM.
+
 - Clone the llama.cpp GitHub repository:
     ```
     git clone https://github.com/ggml-org/llama.cpp.git
@@ -647,15 +651,17 @@ We want our API endpoint to be reachable by the rest of the LAN. For Ollama, thi
     **CPU**
     ```
     cmake -B build
-    cmake --build build --config Release
+    cmake --build build --config Release -j <threads>
     ```
 
     **CUDA**
     ```
     cmake -B build -DGGML_CUDA=ON
-    cmake --build build --config Release
+    cmake --build build --config Release -j <threads>
     ```
-    For other systems looking to use Metal, Vulkan and other low-level graphics APIs, view the complete [llama.cpp build documentation](https://github.com/ggml-org/llama.cpp/blob/master/docs/build.md) to leverage accelerated inference.
+    > Replace `<threads>` with `[number of threads your CPU has] - 2`. This offers a massive boost to the build process as it leverages your system resources better.
+
+For other systems looking to use Metal, Vulkan and other low-level graphics APIs, view the complete [llama.cpp build documentation](https://github.com/ggml-org/llama.cpp/blob/master/docs/build.md) to leverage accelerated inference.
 
 ### vLLM
 
@@ -729,54 +735,6 @@ To serve a different model:
     vllm/vllm-openai:latest \
     --model <model>
     ```
-
-### Open WebUI Integration
-> [!NOTE]
-> Only needed for llama.cpp/vLLM.
-
-Navigate to `Admin Panel > Settings > Connections` and set the following values:
-
-- Enable `OpenAI API`
-- API Base URL: `http://host.docker.internal:<port>/v1`
-- API Key: `anything-you-like`
-
-> [!NOTE]
-> `host.docker.internal` is a magic hostname that resolves to the internal IP address assigned to the host by Docker. This allows containers to communicate with services running on the host, such as databases or web servers, without needing to know the host's IP address. It simplifies communication between containers and host-based services, making it easier to develop and deploy applications.
-
-### Ollama vs. llama.cpp
-
-| **Aspect**                 | **Ollama (Wrapper)**                                          | **llama.cpp (Vanilla)**                                                                   |
-| -------------------------- | ------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| **Installation/Setup**     | One-click install & CLI model management                      | Requires manual setup/configuration                                                       |
-| **Open WebUI Integration** | First-class citizen                                           | Requires OpenAI-compatible endpoint setup                                                 |
-| **Model Switching**        | Native model-switching via server                             | Requires manual port management or [llama-swap](https://github.com/mostlygeek/llama-swap) |
-| **Customizability**        | Limited: Modelfiles are cumbersome                            | Full control over parameters via CLI                                                      |
-| **Transparency**           | Defaults may override model parameters (e.g., context length) | Full transparency in parameter settings                                                   |
-| **GGUF Support**           | Inherits llama.cpp's best-in-class implementation             | Best GGUF implementation                                                                  |
-| **GPU-CPU Splitting**      | Inherits llama.cpp's efficient splitting                      | Trivial GPU-CPU splitting out-of-the-box                                                  |
-
----
-
-### vLLM vs. Ollama/llama.cpp
-| **Feature**             | **vLLM**                                     | **Ollama/llama.cpp**                                                                  |
-| ----------------------- | -------------------------------------------- | ------------------------------------------------------------------------------------- |
-| **Vision Models**       | Supports Qwen 2.5 VL, Llama 3.2 Vision, etc. | Ollama supports some vision models, llama.cpp does not support any (via llama-server) |
-| **Quantization**        | Supports AWQ, GPTQ, BnB, etc.                | Only supports GGUF                                                                    |
-| **Multi-GPU Inference** | Yes                                          | Yes                                                                                   |
-| **Tensor Parallelism**  | Yes                                          | No                                                                                    |
-
-In summary,
-
-- **Ollama**: Best for those who want an "it just works" experience.
-- **llama.cpp**: Best for those who want total control over their inference servers and are familiar with engine arguments.
-- **vLLM**: Best for those who want (i) to run non-GGUF quantizations of models, (ii) multi-GPU inference using tensor parallelism, or (iii) to use vision models.
-
-Using Ollama as a service offers no degradation in experience because unused models are offloaded from VRAM after some time. Using vLLM or llama.cpp as a service keeps a model in memory, so I wouldn't use this alongside Ollama in an automated, always-on fashion unless it was your primary inference engine. Essentially,
-
-| Primary Engine | Secondary Engine | Run SE as service? |
-| -------------- | ---------------- | ------------------ |
-| Ollama         | llama.cpp/vLLM   | No                 |
-| llama.cpp/vLLM | Ollama           | Yes                |
 
 ## Model Server
 
@@ -1058,6 +1016,9 @@ docker run -d -p 3000:8080 --network app-net --gpus all --add-host=host.docker.i
 You can access it by navigating to `http://localhost:3000` in your browser or `http://<server_ip>:3000` from another device on the same network. There's no need to add this to the `init.bash` script as Open WebUI will start automatically at boot via Docker Engine.
 
 Read more about Open WebUI [here](https://github.com/open-webui/open-webui).
+
+> [!NOTE]
+> `host.docker.internal` is a magic hostname that resolves to the internal IP address assigned to the host by Docker. This allows containers to communicate with services running on the host, such as databases or web servers, without needing to know the host's IP address. It simplifies communication between containers and host-based services, making it easier to develop and deploy applications.
 
 ## MCP Proxy Server
 
