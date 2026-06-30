@@ -81,6 +81,7 @@ Software Stack:
     - [vLLM](#vllm-1)
     - [ComfyUI](#comfyui-1)
   - [Troubleshooting](#troubleshooting)
+    - [SearXNG](#searxng-1)
     - [Docker](#docker-1)
     - [`ssh`](#ssh-1)
     - [Nvidia Drivers](#nvidia-drivers)
@@ -547,39 +548,59 @@ This will start an interactive session where you can remove models from the Hugg
 
 🌟 [**GitHub**](https://github.com/searxng/searxng)  
 📖 [**Documentation**](https://docs.searxng.org)  
+📖  [**Docker Installation Reference**](https://docs.searxng.org/admin/installation-docker.html)
 
-To power our search-based workflows, we don't want to rely on a search provider that can monitor searches. While using any search engine has this problem, metasearch engines like SearXNG mitigate it to a decent degree. SearXNG aggregates results from over 245 [search services](https://docs.searxng.org/user/configured_engines.html#configured-engines) and does not track/profile users. You can use a hosted instance on the Internet but, considering the priorities of this guide and how trivial it is to set one up, we'll be spinning up our own instance on port 5050.
+To power our search-based workflows, we don't want to rely on a search provider that can monitor searches. While using any search engine has this problem, metasearch engines like SearXNG mitigate it to a decent degree. SearXNG aggregates results from over 245 [search services](https://docs.searxng.org/user/configured_engines.html#configured-engines) and does not track/profile users. You can use a hosted instance on the Internet but, considering the priorities of this guide and how trivial it is to set one up, we'll be spinning up our own instance on its default port (8080).
 
-1. Start the container:
+
+1. Create the project structure and fetch the compose file:
     ```bash
-    docker pull searxng/searxng
-    export PORT=5050
-    docker run \
-        -d -p ${PORT}:8080 \
-        --name searxng \
-        --network app-net \
-        -v "${PWD}/searxng:/etc/searxng" \
-        -e "BASE_URL=http://0.0.0.0:$PORT/" \
-        -e "INSTANCE_NAME=searxng" \
-        --restart unless-stopped \
-        searxng/searxng
+    mkdir -p searxng/core-config && cd searxng
+    curl -fsSL -O https://raw.githubusercontent.com/searxng/searxng/master/container/docker-compose.yml
     ```
 
-2. Edit `settings.yml` to include JSON format support:
-    ```bash
-    sudo nano searxng/settings.yml
-    ```
-
-    Add the following:
+2. Append `app-net` network to the `core` service in `docker-compose.yml`:
     ```yaml
+    services:
+      core:
+        # ...existing config...
+        networks:
+          default:
+          app-net:
+            aliases:
+              # this allows reference to the "searxng-core" container via "searxng"
+              - searxng
+
+    networks:
+      default:
+      app-net:
+        external: true
+    ```
+
+3. Create `core-config/settings.yml`:
+    ```yaml
+    use_default_settings: true
+
     search:
-      # ...other parameters here...
       formats:
         - html
-        - json      # add this line
+        - json
+
+    server:
+      secret_key: "CHANGE-ME-TO-RANDOM-STRING"
+      image_proxy: true
+      limiter: false
     ```
 
-3. Restart the container with `docker restart searxng`
+4. Start the services:
+    ```bash
+    docker compose up -d
+    ```
+
+> [!TIP]
+> Run `openssl rand -base64 32` to generate a secure random key.
+
+SearXNG is now accessible at `http://localhost:8080` externally and `http://searxng:8080` from containers on `app-net`.
 
 ### Open WebUI Integration
 
@@ -1574,9 +1595,35 @@ pip install -r requirements.txt
 
 ## Troubleshooting
 
+### SearXNG
+
+- **403 Forbidden on search requests**: If you receive a `403 Forbidden` response on search requests, there are two probable causes:
+  - **JSON format not enabled**: By default, SearXNG only allows `html` output. Thus, requests with `?format=json` return 403. Ensure that `json` is in the formats list in `core-config/settings.yml`:
+    ```yaml
+    search:
+      formats:
+        - html
+        - json
+    ```
+  - **Bot detection blocking**: The bot detection middleware blocks requests when it can't determine the client IP (no reverse proxy/`X-Forwarded-For` headers). Check logs with `docker compose logs core` and look for `X-Forwarded-For nor X-Real-IP header is set!`. For private instances, set `limiter: false` under `server:` in `settings.yml`.
+
+- **Container not reachable on `app-net`**: If `http://searxng:8080` is unreachable from other containers, verify the alias:
+  ```bash
+  docker inspect searxng-core --format '{{json .NetworkSettings.Networks}}' | python3 -m json.tool
+  ```
+  The `app-net` entry should list `searxng` under `Aliases`. If missing, ensure the network block is added to `docker-compose.yml` and run `docker compose up -d`. Or, you could refer to it as `searxng-core` and leave aliases altogether - the choice is yours.
+
+- **Port mapping changes both host and internal port**: Setting `SEARXNG_PORT=5050` in `.env` changes *both* the host port and the internal container port. If you change it, update any internal references from `searxng:8080` to `searxng:5050` accordingly.
+
+- **Permission denied writing to `core-config/`**: The container runs as user `searxng` and takes ownership of the mounted volume. If you cannot write files to `core-config/`, fix ownership:
+  ```bash
+  sudo chown -R $USER:$USER searxng/core-config/
+  ```
+  Note that this will revert the next time you restart the container unless you populate `user: <user_id>:><group_id>` in the compose file (which I don't recommend doing because searxng is particular about directory ownership and throws warnings if you change it).
+
 ### Docker
 
-- Since we aim to use our user instead of root to run services, you may encounter permissions issues when trying to mount a volume that is not technically owned by our user. To fix this, you can do one of two things:
+- **Volume mount permission denied**: Since we aim to use our user instead of root to run services, you may encounter permissions issues when trying to mount a volume that is not technically owned by our user. To fix this, you can do one of two things:
   - Change the ownership of the directory:
     ```bash
     sudo chown -R $(id -u):$(id -g) /path/to/volume
@@ -1598,14 +1645,17 @@ pip install -r requirements.txt
     I like ACLs better - it solves the access issue cleanly without changing ownership unnecessarily and, in my experience, tends to break things less. However, if the resource is clearly meant to be owned by a specific user, changing ownership is preferred purely for separation of concerns. Gauge for yourself, both are completely acceptable options. Avoid changing permissions if your container is already up and running, though.
 
 ### `ssh`
-- If you encounter an issue using `ssh-copy-id` to set up passwordless SSH, try running `ssh-keygen -t rsa` on the client before running `ssh-copy-id`. This generates the RSA key pair that `ssh-copy-id` needs to copy to the server.
+- **`ssh-copy-id` fails to set up passwordless SSH**: If you encounter an issue using `ssh-copy-id` to set up passwordless SSH, try running `ssh-keygen -t rsa` on the client before running `ssh-copy-id`. This generates the RSA key pair that `ssh-copy-id` needs to copy to the server.
 
 ### Nvidia Drivers
-- Disable Secure Boot in the BIOS if you're having trouble with the Nvidia drivers not working. For me, all packages were at the latest versions and `nvidia-detect` was able to find my GPU correctly, but `nvidia-smi` kept returning the `NVIDIA-SMI has failed because it couldn't communicate with the NVIDIA driver` error. [Disabling Secure Boot](https://askubuntu.com/a/927470) fixed this for me. Better practice than disabling Secure Boot is to sign the Nvidia drivers yourself but I didn't want to go through that process for a non-critical server that can afford to have Secure Boot disabled.
-- If you run into `docker: Error response from daemon: unknown or invalid runtime name: nvidia.`, you probably have `--runtime nvidia` in your Docker statement. This is meant for `nvidia-docker`, [which is deprecated now](https://stackoverflow.com/questions/52865988/nvidia-docker-unknown-runtime-specified-nvidia). Removing this flag from your command should get rid of this error.
+
+- **`nvidia-smi` can't communicate with the driver**: Disable Secure Boot in the BIOS if you're having trouble with the Nvidia drivers not working. For me, all packages were at the latest versions and `nvidia-detect` was able to find my GPU correctly, but `nvidia-smi` kept returning the `NVIDIA-SMI has failed because it couldn't communicate with the NVIDIA driver` error. [Disabling Secure Boot](https://askubuntu.com/a/927470) fixed this for me. Better practice than disabling Secure Boot is to sign the Nvidia drivers yourself but I didn't want to go through that process for a private server that can afford to have Secure Boot disabled.
+
+- **`unknown or invalid runtime name: nvidia` error in Docker**: If you run into `docker: Error response from daemon: unknown or invalid runtime name: nvidia.`, you probably have `--runtime nvidia` in your Docker statement. This is meant for `nvidia-docker`, [which is deprecated now](https://stackoverflow.com/questions/52865988/nvidia-docker-unknown-runtime-specified-nvidia). Removing this flag from your command should get rid of this error.
 
 ### Ollama
-- If you receive the `could not connect to ollama app, is it running?` error, your Ollama instance wasn't served properly. This could be because of a manual installation or the desire to use it at-will and not as a service. To run the Ollama server once, run:
+
+- **`could not connect to ollama app, is it running?`**: If you receive this error, your Ollama instance wasn't served properly. This could be because of a manual installation or the desire to use it at-will and not as a service. To run the Ollama server once, run:
     ```
     ollama serve
     ```
@@ -1615,17 +1665,18 @@ pip install -r requirements.txt
     ```
     For detailed instructions on _manually_ configuring Ollama to run as a service (to run automatically at boot), read the official documentation [here](https://github.com/ollama/ollama/blob/main/docs/linux.md). You shouldn't need to do this unless your system faces restrictions using Ollama's automated installer.
     
-- If you receive the `Failed to open "/etc/systemd/system/ollama.service.d/.#override.confb927ee3c846beff8": Permission denied` error from Ollama after running `systemctl edit ollama.service`, simply creating the file works to eliminate it. Use the following steps to edit the file. 
+- **Permission denied when editing `ollama.service`**: If you receive the `Failed to open "/etc/systemd/system/ollama.service.d/.#override.confb927ee3c846beff8": Permission denied` error from Ollama after running `systemctl edit ollama.service`, simply creating the file works to eliminate it. Use the following steps to edit the file.
   - Run:
     ```
     sudo mkdir -p /etc/systemd/system/ollama.service.d
     sudo nano /etc/systemd/system/ollama.service.d/override.conf
     ```
   - Retry the remaining steps.
-- If you still can't connect to your API endpoint, check your firewall settings. [This guide to UFW (Uncomplicated Firewall) on Debian](https://www.digitalocean.com/community/tutorials/how-to-set-up-a-firewall-with-ufw-on-debian-10) is a good resource.
+- **Can't connect to API endpoint**: If you still can't connect to your API endpoint, check your firewall settings. [This guide to UFW (Uncomplicated Firewall) on Debian](https://www.digitalocean.com/community/tutorials/how-to-set-up-a-firewall-with-ufw-on-debian-10) is a good resource.
 
 ### vLLM
-- If you encounter ```RuntimeError: An error occurred while downloading using `hf_transfer`. Consider disabling HF_HUB_ENABLE_HF_TRANSFER for better error handling.```, add `HF_HUB_ENABLE_HF_TRANSFER=0` to the `--env` flag after your HuggingFace Hub token. If this still doesn't fix the issue -
+
+- **`RuntimeError` downloading with `hf_transfer`**: If you encounter ```RuntimeError: An error occurred while downloading using `hf_transfer`. Consider disabling HF_HUB_ENABLE_HF_TRANSFER for better error handling.```, add `HF_HUB_ENABLE_HF_TRANSFER=0` to the `--env` flag after your HuggingFace Hub token. If this still doesn't fix the issue:
   - Ensure your user has all the requisite permissions for HuggingFace to be able to write to the cache. To give read+write access over the HF cache to your user (and, thus, `huggingface-cli`), run:
     ```
     sudo chmod 777 ~/.cache/huggingface
@@ -1634,7 +1685,8 @@ pip install -r requirements.txt
   - Manually download a model via the HuggingFace CLI and specify `--download-dir=~/.cache/huggingface/hub` in the engine arguments. If your `.cache/huggingface` directory is being troublesome, specify another directory to the `--download-dir` in the engine arguments and remember to do the same with the `--local-dir` flag in any `huggingface-cli` commands.
 
 ### Open WebUI
-- If you encounter `Ollama: llama runner process has terminated: signal: killed`, check your `Advanced Parameters`, under `Settings > General > Advanced Parameters`. For me, bumping the context length past what certain models could handle was breaking the Ollama server. Leave it to the default (or higher, but make sure it's still under the limit for the model you're using) to fix this issue.
+
+- **`llama runner process has terminated: signal: killed`**: If you encounter `Ollama: llama runner process has terminated: signal: killed`, check your `Advanced Parameters`, under `Settings > General > Advanced Parameters`. For me, bumping the context length past what certain models could handle was breaking the Ollama server. Leave it to the default (or higher, but make sure it's still under the limit for the model you're using) to fix this issue.
 
 ## Monitoring
 
